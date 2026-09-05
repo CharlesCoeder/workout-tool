@@ -1,0 +1,19 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "households": {
+      "$hid": {
+        ".read": "auth != null && $hid.length >= 16",
+        ".write": "auth != null && $hid.length >= 16"
+      }
+    },
+    "pairings": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && $code.length == 4",
+        ".validate": "newData.hasChildren(['tvHid']) || newData.val() == null"
+      }
+    }
+  }
+}

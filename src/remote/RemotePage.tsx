@@ -1,0 +1,678 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useApp, useSettled } from '../lib/store';
+import { useWakeLock } from '../lib/useWakeLock';
+import { joinPairing } from '../lib/pairing';
+import { Link } from '../lib/router';
+import { currentExercise, progress, remainingMs } from '../engine/session';
+import { planDay, planExercise, suggestNextDay } from '../engine/plan';
+import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
+import type { Day, DemoCommand, PlannedExercise, SessionState } from '../engine/types';
+import { fmtCountdown, perEndLabel, repsTarget, weightLabel } from '../ui/format';
+import { PlateBar } from '../ui/PlateBar';
+import { RackChanges } from '../ui/RackChanges';
+import { rackPlanFor } from '../ui/rack';
+
+type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo';
+
+export function RemotePage() {
+  const app = useApp();
+  const { session, now } = useSettled();
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const active = !!session && session.phase.kind !== 'summary';
+  useWakeLock(active);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  // ?pair=CODE deep link from the TV screen.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('pair');
+    if (code && app.mode === 'firebase') setSheet('pair');
+  }, [app.mode]);
+
+  if (!app.loaded) {
+    return (
+      <div className="remote">
+        <div className="muted" style={{ textAlign: 'center', marginTop: 80 }}>
+          Connecting…
+        </div>
+      </div>
+    );
+  }
+
+  const say = (m: string) => setToast(m);
+  const ex = session ? currentExercise(session) : undefined;
+
+  const closeSheet = () => setSheet(null);
+  // "Demo video" puts the clip full-screen on the TV and opens the controls.
+  const openDemo = () => {
+    void app.dispatch({ type: 'showDemo' });
+    setSheet('demo');
+  };
+  const sheets = (
+    <>
+      {sheet === 'menu' && session && (
+        <BottomSheet onClose={closeSheet} title="Session">
+          <div className="list">
+            <button className="item" onClick={() => setSheet('demo')}>
+              Demo video controls
+            </button>
+            {ex && ex.load !== 'bodyweight' && (
+              <button className="item" onClick={() => setSheet('weight')}>
+                Change weight <span className="muted">{formatLb(ex.weightLb)} lb</span>
+              </button>
+            )}
+            {ex && (
+              <button className="item" onClick={() => setSheet('swap')}>
+                Swap exercise
+              </button>
+            )}
+            {ex && (
+              <button className="item" onClick={() => void app.dispatch({ type: 'skipExercise' }).then(closeSheet)}>
+                Skip {ex.name}
+              </button>
+            )}
+            <button className="item danger" onClick={() => setSheet('end')}>
+              End session early
+            </button>
+          </div>
+          <div className="row" style={{ justifyContent: 'center', gap: 18 }}>
+            <Link to="/history">History</Link>
+            <Link to="/settings">Settings</Link>
+            {app.mode === 'firebase' && <button onClick={() => setSheet('pair')} className="accent">Pair a TV</button>}
+          </div>
+        </BottomSheet>
+      )}
+      {sheet === 'weight' && session && ex && <WeightSheet ex={ex} onClose={closeSheet} onDone={say} />}
+      {sheet === 'demo' && session && ex && <DemoSheet session={session} ex={ex} onClose={closeSheet} />}
+      {sheet === 'swap' && session && ex && <SwapSheet session={session} ex={ex} onClose={closeSheet} onDone={say} />}
+      {sheet === 'end' && (
+        <BottomSheet onClose={closeSheet} title="End the session?">
+          <p className="muted">What you've logged so far is saved and counts for progression.</p>
+          <button className="btn danger big" onClick={() => void app.dispatch({ type: 'endSession' }).then(closeSheet)}>
+            End session
+          </button>
+          <button className="btn ghost" onClick={closeSheet}>
+            Keep going
+          </button>
+        </BottomSheet>
+      )}
+      {sheet === 'pair' && <PairSheet onClose={closeSheet} onDone={say} />}
+      {toast && <div className="toast">{toast}</div>}
+    </>
+  );
+
+  if (!session) {
+    return (
+      <div className="remote">
+        <DayPicker onPair={() => setSheet('pair')} />
+        {sheets}
+      </div>
+    );
+  }
+
+  const p = session.phase;
+  let body: ReactNode;
+  switch (p.kind) {
+    case 'warmup':
+      body = <WarmupControls s={session} now={now} />;
+      break;
+    case 'ready':
+      body = (
+        <ReadyControls s={session} now={now} onWeight={() => setSheet('weight')} onSwap={() => setSheet('swap')} onDemo={() => openDemo()} />
+      );
+      break;
+    case 'working':
+    case 'logging':
+      body = <RepControls s={session} onWeight={() => setSheet('weight')} onSwap={() => setSheet('swap')} onDemo={() => openDemo()} />;
+      break;
+    case 'rest':
+      body = <RestControls s={session} now={now} onWeight={() => setSheet('weight')} onDemo={() => openDemo()} />;
+      break;
+    case 'summary':
+      body = <SummaryControls s={session} />;
+      break;
+  }
+
+  return (
+    <div className="remote">
+      <Header s={session} />
+      {body}
+      {p.kind !== 'summary' && (
+        <div className="footer">
+          {session.paused ? (
+            <button className="btn primary grow" onClick={() => void app.dispatch({ type: 'resume' })}>
+              Resume
+            </button>
+          ) : (
+            <button className="btn ghost grow" onClick={() => void app.dispatch({ type: 'pause' })}>
+              Pause
+            </button>
+          )}
+          <button className="btn ghost" onClick={() => setSheet('menu')}>
+            More
+          </button>
+        </div>
+      )}
+      {sheets}
+    </div>
+  );
+}
+
+// ---------- Pieces ----------
+
+function Header({ s }: { s: SessionState }) {
+  const pr = progress(s);
+  return (
+    <div className="row spread">
+      <span className="eyebrow">{s.dayName}</span>
+      <span className="muted" style={{ fontSize: 14 }}>
+        {pr.setsDone}/{pr.setsTotal} sets{s.paused ? ' · paused' : ''}
+      </span>
+    </div>
+  );
+}
+
+function BottomSheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  return (
+    <div className="sheet" onClick={onClose}>
+      <div className="panel" onClick={(e) => e.stopPropagation()}>
+        <div className="row spread">
+          <strong style={{ fontSize: 18 }}>{title}</strong>
+          <button className="btn small ghost" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ExerciseHero({ ex, sub }: { ex: PlannedExercise; sub?: string }) {
+  return (
+    <div className="hero">
+      {sub && <div className="eyebrow accent">{sub}</div>}
+      <div className="name">{ex.name}</div>
+      <div className="weight">
+        {weightLabel(ex.weightLb, ex.load)}
+        {ex.loading && <span className="muted" style={{ fontWeight: 400 }}> · {perEndLabel(ex.loading.perEnd)}</span>}
+      </div>
+      <div className="row wrap" style={{ gap: 6 }}>
+        <span className="pill">{repsTarget(ex)}</span>
+        {ex.progressed && <span className="pill good">▲ up from last time</span>}
+        {ex.blocked && <span className="pill warn">maxed out on your plates</span>}
+        {!ex.blocked && ex.maxedOut && ex.load !== 'bodyweight' && <span className="pill warn">at your plate ceiling</span>}
+        {ex.weightLb !== ex.prescribedLb && <span className="pill">overridden</span>}
+      </div>
+    </div>
+  );
+}
+
+function DayPicker({ onPair }: { onPair: () => void }) {
+  const app = useApp();
+  const suggested = suggestNextDay(app.program, app.history);
+  const [busy, setBusy] = useState(false);
+  const plans = useMemo(
+    () => Object.fromEntries(app.program.days.map((d) => [d.id, planDay(app.program, d, app.history, app.inventory)])),
+    [app.program, app.history, app.inventory],
+  );
+  const start = async (d: Day) => {
+    setBusy(true);
+    try {
+      await app.startSession(d.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="row spread">
+        <h1 style={{ margin: 0, fontSize: 24 }}>Dumbbell Coach</h1>
+        <div className="row" style={{ gap: 14 }}>
+          <Link to="/history">History</Link>
+          <Link to="/settings">Settings</Link>
+        </div>
+      </div>
+      {app.mode === 'firebase' && !app.hasData && (
+        <div className="card stack">
+          <strong>First time here?</strong>
+          <span className="muted">If your TV shows a pairing code, enter it so both screens share one session and history.</span>
+          <button className="btn primary" onClick={onPair}>
+            Enter pairing code
+          </button>
+        </div>
+      )}
+      {app.mode === 'local' && <div className="notice">Local mode: open /tv in another tab of this browser to see the TV screen.</div>}
+      <div className="days">
+        {app.program.days.map((d) => {
+          const plan = plans[d.id];
+          const isSug = suggested?.id === d.id;
+          return (
+            <button key={d.id} className={`day ${isSug ? 'suggested' : ''}`} disabled={busy} onClick={() => void start(d)}>
+              <div className="row spread">
+                <span className="title">{d.name}</span>
+                {isSug && <span className="pill accent">Up next</span>}
+              </div>
+              <div className="list">
+                {plan.map((e) => (
+                  <div key={e.exerciseId}>
+                    {e.name}
+                    {e.load !== 'bodyweight' && (
+                      <span className="faint">
+                        {' '}
+                        · {formatLb(e.weightLb)} lb{e.progressed ? ' ▲' : ''}
+                        {e.blocked ? ' (maxed)' : ''}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <span className="btn primary small" style={{ alignSelf: 'flex-start' }}>
+                Start {d.name}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {app.mode === 'firebase' && app.hasData && (
+        <button className="btn ghost small" style={{ alignSelf: 'center' }} onClick={onPair}>
+          Pair a TV
+        </button>
+      )}
+    </>
+  );
+}
+
+function WarmupControls({ s, now }: { s: SessionState; now: number }) {
+  const app = useApp();
+  const p = s.phase as Extract<SessionState['phase'], { kind: 'warmup' }>;
+  return (
+    <>
+      <div className="hero">
+        <div className="eyebrow accent">
+          Warm-up {p.step + 1} of {s.warmup.length}
+        </div>
+        <div className="name">{s.warmup[p.step]?.name}</div>
+      </div>
+      <div className="count">{fmtCountdown(remainingMs(s, now))}</div>
+      <div className="actions">
+        <button className="btn" onClick={() => void app.dispatch({ type: 'skipWarmupStep' })}>
+          Next step
+        </button>
+        <button className="btn ghost" onClick={() => void app.dispatch({ type: 'skipWarmup' })}>
+          Skip warm-up
+        </button>
+      </div>
+    </>
+  );
+}
+
+function ReadyControls({
+  s,
+  now,
+  onWeight,
+  onSwap,
+  onDemo,
+}: {
+  s: SessionState;
+  now: number;
+  onWeight: () => void;
+  onSwap: () => void;
+  onDemo: () => void;
+}) {
+  const app = useApp();
+  const ex = currentExercise(s)!;
+  const plan = rackPlanFor(s, s.cursor.ex, app.inventory);
+  return (
+    <>
+      <ExerciseHero ex={ex} sub={`Get ready · set ${s.cursor.set + 1} of ${ex.sets}`} />
+      {ex.loading && (
+        <div style={{ fontSize: 44, padding: '6px 0 18px' }}>
+          <PlateBar perEnd={ex.loading.perEnd} tone="accent" />
+        </div>
+      )}
+      <div style={{ fontSize: 15 }}>
+        <RackChanges changes={plan.changes} handles={app.inventory.handles} />
+      </div>
+      <div className="count">{fmtCountdown(remainingMs(s, now))}</div>
+      <div className="actions">
+        <button className="btn primary big wide" onClick={() => void app.dispatch({ type: 'go' })}>
+          Go
+        </button>
+        {ex.load !== 'bodyweight' && (
+          <button className="btn" onClick={onWeight}>
+            Change weight
+          </button>
+        )}
+        <button className="btn" onClick={onSwap}>
+          Swap exercise
+        </button>
+        <button className="btn ghost wide" onClick={onDemo}>
+          Demo video
+        </button>
+      </div>
+    </>
+  );
+}
+
+function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeight: () => void; onSwap: () => void; onDemo: () => void }) {
+  const app = useApp();
+  const ex = currentExercise(s)!;
+  const lo = Math.max(1, ex.repMin - 3);
+  const hi = ex.repMax + 4;
+  const nums = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+  return (
+    <>
+      <ExerciseHero ex={ex} sub={`Set ${s.cursor.set + 1} of ${ex.sets} · in progress`} />
+      <div className="muted" style={{ fontSize: 15 }}>
+        How many reps did you get{ex.perSide ? ' (per side)' : ''}? Tap the number when you're done.
+      </div>
+      <div className="reps">
+        {nums.map((n) => (
+          <button
+            key={n}
+            className={n >= ex.repMax ? 'top' : n >= ex.repMin ? 'in' : ''}
+            onClick={() => void app.dispatch({ type: 'logReps', reps: n })}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <div className="actions">
+        <button className="btn ghost small" onClick={() => void app.dispatch({ type: 'logReps', reps: 0 })}>
+          Couldn't do it (0)
+        </button>
+        <button className="btn ghost small" onClick={onDemo}>
+          Demo video
+        </button>
+        {ex.load !== 'bodyweight' ? (
+          <button className="btn ghost small" onClick={onWeight}>
+            Change weight
+          </button>
+        ) : (
+          <span />
+        )}
+        <button className="btn ghost small" onClick={onSwap}>
+          Swap exercise
+        </button>
+      </div>
+    </>
+  );
+}
+
+function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: number; onWeight: () => void; onDemo: () => void }) {
+  const app = useApp();
+  const p = s.phase as Extract<SessionState['phase'], { kind: 'rest' }>;
+  const ex = currentExercise(s)!;
+  const plan = rackPlanFor(s, s.cursor.ex, app.inventory);
+  const sameExercise = s.cursor.set > 0;
+  return (
+    <>
+      <div className="hero">
+        <div className="eyebrow accent">Rest</div>
+      </div>
+      <div className="count">{fmtCountdown(remainingMs(s, now))}</div>
+      <div className="card stack" style={{ gap: 8 }}>
+        <div className="eyebrow">{sameExercise ? 'Next' : 'Next up'}</div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{ex.name}</div>
+        <div className="muted">
+          Set {s.cursor.set + 1} of {ex.sets} · {repsTarget(ex)}
+        </div>
+        {ex.load !== 'bodyweight' && (
+          <div style={{ fontSize: 18, fontWeight: 600 }}>
+            {weightLabel(ex.weightLb, ex.load)}
+            {ex.loading && <span className="muted" style={{ fontWeight: 400 }}> · {perEndLabel(ex.loading.perEnd)}</span>}
+          </div>
+        )}
+        {p.rerack && plan.changes.length > 0 && (
+          <div style={{ fontSize: 15 }}>
+            <span className="pill accent">Change plates now</span>
+            <div style={{ height: 8 }} />
+            <RackChanges changes={plan.changes} handles={app.inventory.handles} />
+          </div>
+        )}
+      </div>
+      <div className="actions">
+        <button className="btn primary big wide" onClick={() => void app.dispatch({ type: 'skipRest' })}>
+          Skip rest
+        </button>
+        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: 30 })}>
+          +30 s
+        </button>
+        {ex.load !== 'bodyweight' ? (
+          <button className="btn" onClick={onWeight}>
+            Change weight
+          </button>
+        ) : (
+          <span />
+        )}
+        <button className="btn ghost wide" onClick={onDemo}>
+          Demo video
+        </button>
+      </div>
+    </>
+  );
+}
+
+function SummaryControls({ s }: { s: SessionState }) {
+  const app = useApp();
+  const done = s.exercises.filter((e) => e.results.length > 0);
+  return (
+    <>
+      <div className="hero">
+        <div className="eyebrow accent">Session complete</div>
+        <div className="name">Nice work.</div>
+      </div>
+      <div className="card stack" style={{ gap: 8 }}>
+        {done.map((e) => (
+          <div key={e.exerciseId} className="row spread">
+            <span>{e.name}</span>
+            <span className="muted">
+              {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
+              {e.results.map((r) => r.reps).join(', ')}
+            </span>
+          </div>
+        ))}
+        {!done.length && <span className="muted">Nothing logged.</span>}
+      </div>
+      <button className="btn primary big" onClick={() => void app.clearLive()}>
+        Finish
+      </button>
+      <div className="row" style={{ justifyContent: 'center', gap: 18 }}>
+        <Link to="/history">History</Link>
+        <Link to="/settings">Settings</Link>
+      </div>
+    </>
+  );
+}
+
+// ---------- Sheets ----------
+
+function WeightSheet({ ex, onClose, onDone }: { ex: PlannedExercise; onClose: () => void; onDone: (m: string) => void }) {
+  const app = useApp();
+  const mode = ex.load;
+  const weights = achievableWeights(app.inventory, mode);
+  const pick = async (lb: number) => {
+    const loading = loadingFor(app.inventory, mode, lb, ex.loading?.perEnd);
+    await app.dispatch({ type: 'overrideWeight', weightLb: lb, loading });
+    onDone(`${ex.name}: ${formatLb(lb)} lb`);
+    onClose();
+  };
+  return (
+    <BottomSheet onClose={onClose} title={`Weight for ${ex.name}`}>
+      <div className="muted">
+        Only weights your plates can build. Prescribed: {formatLb(ex.prescribedLb)} lb{mode === 'pair' ? ' each' : ''}.
+      </div>
+      <div className="chips">
+        {weights.map((w) => (
+          <button key={w} className={Math.abs(w - ex.weightLb) < 1e-9 ? 'on' : ''} onClick={() => void pick(w)}>
+            {formatLb(w)}
+          </button>
+        ))}
+      </div>
+      {ex.loading && (
+        <div className="muted" style={{ fontSize: 14 }}>
+          Now: {perEndLabel(ex.loading.perEnd)}
+        </div>
+      )}
+    </BottomSheet>
+  );
+}
+
+function SwapSheet({
+  session,
+  ex,
+  onClose,
+  onDone,
+}: {
+  session: SessionState;
+  ex: PlannedExercise;
+  onClose: () => void;
+  onDone: (m: string) => void;
+}) {
+  const app = useApp();
+  const lib = app.program.exercises;
+  const subs = ex.substitutes.map((id) => lib[id]).filter(Boolean);
+  const inSession = new Set(session.exercises.map((e) => e.exerciseId));
+  const others = Object.values(lib)
+    .filter((e) => e.id !== ex.exerciseId && !subs.includes(e) && !inSession.has(e.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const pick = async (id: string) => {
+    const target = lib[id];
+    const planned = planExercise(target, app.history, app.inventory, { sets: ex.sets }, ex.loading?.perEnd);
+    await app.dispatch({ type: 'substitute', exercise: planned });
+    onDone(`Swapped to ${target.name}`);
+    onClose();
+  };
+  const Item = ({ id, name }: { id: string; name: string }) => (
+    <button className="item" onClick={() => void pick(id)}>
+      <span>{name}</span>
+      <span className="muted" style={{ fontSize: 13 }}>
+        {lib[id].load === 'bodyweight' ? 'bodyweight' : lib[id].load}
+      </span>
+    </button>
+  );
+  return (
+    <BottomSheet onClose={onClose} title={`Swap ${ex.name}`}>
+      {subs.length > 0 && (
+        <>
+          <div className="eyebrow">Substitutes</div>
+          <div className="list">
+            {subs.map((e) => (
+              <Item key={e.id} id={e.id} name={e.name} />
+            ))}
+          </div>
+        </>
+      )}
+      <div className="eyebrow">Anything else</div>
+      <div className="list">
+        {others.map((e) => (
+          <Item key={e.id} id={e.id} name={e.name} />
+        ))}
+      </div>
+    </BottomSheet>
+  );
+}
+
+const RATES = [0.25, 0.5, 0.75, 1];
+
+function DemoSheet({ session, ex, onClose }: { session: SessionState; ex: PlannedExercise; onClose: () => void }) {
+  const app = useApp();
+  const d = session.demo;
+  const cmd = (c: DemoCommand) => void app.dispatch({ type: 'demoCommand', cmd: c });
+  const timed = session.phase.kind === 'rest' || session.phase.kind === 'ready' || session.phase.kind === 'warmup';
+  return (
+    <BottomSheet onClose={onClose} title={ex.name}>
+      {!ex.demo && <div className="notice">No demo clip for this exercise yet. Add one in Settings → Exercises.</div>}
+      <div className="row">
+        <button className={`btn grow ${d.enlarged ? '' : 'primary'}`} onClick={() => void app.dispatch({ type: d.enlarged ? 'hideDemo' : 'showDemo' })}>
+          {d.enlarged ? 'Hide from TV' : 'Show on TV'}
+        </button>
+        {timed && (
+          <button className={`btn grow ${session.paused ? 'primary' : 'ghost'}`} onClick={() => void app.dispatch({ type: session.paused ? 'resume' : 'pause' })}>
+            {session.paused ? 'Resume timer' : 'Pause timer'}
+          </button>
+        )}
+      </div>
+      <div className="eyebrow">Playback</div>
+      <div className="row" style={{ gap: 8 }}>
+        <button className="btn grow" onClick={() => cmd({ type: 'restart' })} aria-label="Restart">
+          ⟲
+        </button>
+        <button className="btn grow" onClick={() => cmd({ type: 'seekBy', seconds: -5 })}>
+          −5s
+        </button>
+        <button className="btn grow" onClick={() => cmd({ type: 'toggle' })} aria-label="Play or pause">
+          ▶❚❚
+        </button>
+        <button className="btn grow" onClick={() => cmd({ type: 'seekBy', seconds: 5 })}>
+          +5s
+        </button>
+      </div>
+      <div className="eyebrow">Speed</div>
+      <div className="row" style={{ gap: 8 }}>
+        {RATES.map((r) => (
+          <button key={r} className={`btn grow ${Math.abs(d.rate - r) < 0.01 ? 'primary' : ''}`} onClick={() => void app.dispatch({ type: 'demoRate', rate: r })}>
+            {r === 1 ? 'Normal' : `${r}×`}
+          </button>
+        ))}
+      </div>
+      <p className="faint" style={{ fontSize: 13, margin: 0 }}>
+        The clip hides on its own when the set starts. Speed stays until you change it.
+      </p>
+    </BottomSheet>
+  );
+}
+
+function PairSheet({ onClose, onDone }: { onClose: () => void; onDone: (m: string) => void }) {
+  const app = useApp();
+  const [code, setCode] = useState(() => new URLSearchParams(window.location.search).get('pair') ?? '');
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const hid = await joinPairing(app.backend, code, app.hasData ? app.hid : null);
+      app.setHid(hid);
+      onDone('Paired with the TV');
+      window.history.replaceState({}, '', '/remote');
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (app.mode !== 'firebase') {
+    return (
+      <BottomSheet onClose={onClose} title="Pairing">
+        <p className="muted">Local mode doesn't need pairing: open /tv in another tab of this browser.</p>
+      </BottomSheet>
+    );
+  }
+  return (
+    <BottomSheet onClose={onClose} title="Pair with the TV">
+      <p className="muted">Type the 4-letter code shown at the bottom of the TV screen.</p>
+      <input
+        value={code}
+        onChange={(e) => setCode(e.target.value.toUpperCase())}
+        placeholder="ABCD"
+        maxLength={4}
+        autoCapitalize="characters"
+        autoCorrect="off"
+        style={{ fontSize: 28, letterSpacing: '0.3em', textAlign: 'center' }}
+      />
+      {err && <div className="error">{err}</div>}
+      <button className="btn primary big" disabled={busy || code.length !== 4} onClick={() => void go()}>
+        Pair
+      </button>
+      {app.hasData && <p className="faint" style={{ fontSize: 13 }}>This phone's history will be used on the TV.</p>}
+    </BottomSheet>
+  );
+}

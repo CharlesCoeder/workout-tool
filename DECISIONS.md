@@ -1,0 +1,24 @@
+# Decisions log
+
+Sensible calls made without asking, newest last.
+
+1. **RTDB for history too, not Firestore.** One SDK module, one rules file, one mental model. Volume is tiny.
+2. **Household id as capability, not per-UID data.** Anonymous auth gives each device a different UID, so TV and phone can't share a UID-scoped tree. An unguessable 20-char household id under rules that require any signed-in user is the simplest safe-enough model for one person's workout log.
+3. **Local mode by default.** With no Firebase env the app runs fully in one browser (localStorage + BroadcastChannel). You can try everything before creating a Firebase project.
+4. **Timers are timestamps; transitions are derived.** No client owns a countdown. `settle(state, now)` is pure and both screens agree.
+5. **One tap per set.** The rep picker is shown during the set; tapping a number ends the set and starts the rest. A separate "Done" then "how many?" path exists for voice.
+6. **Rest before a new exercise doubles as "get ready".** A separate ready screen before every exercise would add dead time. The rest screen shows next exercise, weight, plate change and demo, and is extended by a re-rack bonus when plates change.
+7. **No automatic deload.** The program doesn't specify one. If you fall short of the range the weight stays; you can override on the remote.
+8. **Starting weights are guesses.** Each exercise has `startWeightLb` in settings; the remote's override snaps to your plates so a wrong guess costs one tap.
+9. **Substitutions are planned on the phone.** The remote computes the substitute's weight/loading from history and inventory and sends a complete planned exercise in the action, keeping the reducer free of history/inventory.
+10. **History is upserted after every logged set.** An abandoned session still counts for progression.
+11. **Single-dumbbell lifts and the second handle.** The TV shows the loading for the working handle and says "strip the other handle" only when the plate pool requires it.
+12. **Demo videos are YouTube embeds by default**, muted and looping, with a "no demo yet" card when an exercise has none. Recording your own means pasting a URL in settings.
+13. **No router library, no CSS framework, no state library.** Four pages, hand-rolled path switch, CSS custom properties. Dependencies: react, react-dom, firebase.
+14. **Demo clips are public YouTube tutorials**, chosen by search and checked for embeddability. Several are Muscle & Strength's own demo videos; the site itself blocks scraping so IDs were found via search. The `loop` embed parameter restarts from 0, so the per-exercise "start at" offset only applies to the first play.
+15. **Countdown beeps need one click on the TV page.** Browsers block audio until a user gesture; the TV shows a one-line hint until it has one. Casting a tab from a laptop counts as the laptop's click.
+16. **Voice runs only while a session is live** and restarts itself whenever Chrome ends the recognition stream. Numbers are accepted only during a set (or after "done"), so a stray "ten" mid-rest does nothing.
+17. **Rest after the last set of an exercise uses that exercise's rest**, plus the re-rack bonus when plates change. The rest before the first exercise is the "get ready" countdown instead.
+18. **Firebase is split into its own chunk** so the app shell stays small; the SDK is only loaded when env vars are set.
+19. **Pausing dims nothing.** The paused state is a small badge in the corner; the countdown just stops. The demo keeps playing so you can study it.
+20. **The enlarged demo is a stage, not a flash.** "Demo video" on the phone puts the clip full-screen on the TV with the timer (or "Paused") in the corner, and it stays until you hide it or the set starts. The phone drives the player through the YouTube IFrame API: restart, ±5 s, play/pause, and 0.25×–1× speed. Speed persists across exercises until changed.
