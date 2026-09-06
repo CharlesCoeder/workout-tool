@@ -580,6 +580,10 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
           <span>Countdown beeps on the TV (3, 2, 1, go)</span>
         </label>
         <label className="row">
+          <input type="checkbox" checked={s.phoneVibrate} onChange={(e) => save({ phoneVibrate: e.target.checked })} />
+          <span>Buzz the phone at 3, 2, 1 and go (Android; iPhones can't)</span>
+        </label>
+        <label className="row">
           <input type="checkbox" checked={s.voiceEnabled} onChange={(e) => save({ voiceEnabled: e.target.checked })} />
           <span>Voice control on the TV page (Chrome, needs a microphone)</span>
         </label>

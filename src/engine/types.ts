@@ -87,6 +87,8 @@ export interface Settings {
   progressionRule: ProgressionRule;
   /** Sessions per week you are aiming for; drives the "this week" card. */
   targetSessionsPerWeek: number;
+  /** Buzz the phone at 3-2-1 and go (Android; iOS has no vibration API). */
+  phoneVibrate: boolean;
 }
 
 // ---------- Session ----------

@@ -19,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   countdownBeeps: true,
   progressionRule: 'firstSet',
   targetSessionsPerWeek: 3,
+  phoneVibrate: true,
 };
 
 // Main muscle first: it gets full credit for a set in the weekly balance chart, the rest get half.

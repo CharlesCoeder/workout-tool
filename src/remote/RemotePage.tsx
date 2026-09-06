@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useApp, useSettled } from '../lib/store';
 import { useWakeLock } from '../lib/useWakeLock';
+import { useVibrate } from '../lib/useVibrate';
 import { joinPairing } from '../lib/pairing';
 import { Link } from '../lib/router';
 import { currentExercise, isStale, lastActivityAt, lastLoggedSet, progress, remainingMs } from '../engine/session';
@@ -34,6 +35,7 @@ export function RemotePage() {
   const stale = !!session && isStale(session, now) && resumedStale !== session.id;
   const active = !!session && session.phase.kind !== 'summary' && !stale;
   useWakeLock(active);
+  useVibrate(active ? session : null, now, app.settings.phoneVibrate);
 
   useEffect(() => {
     if (!toast) return;
