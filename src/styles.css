@@ -1139,3 +1139,24 @@ table.plain th {
 .chart .line.alt {
   stroke: var(--good);
 }
+
+/* ---------- History: plates ---------- */
+
+.frow {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.frow:last-child {
+  border-bottom: 0;
+}
+.ladder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+}
+.ladder .jump {
+  font-size: 11px;
+  padding: 0 4px;
+}

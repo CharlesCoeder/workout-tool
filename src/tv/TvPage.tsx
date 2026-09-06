@@ -716,7 +716,7 @@ function TvSummary({ s, program, history, inv, rule }: { s: SessionState; progra
             </tbody>
           </table>
           {rows.some((r) => r.next?.blocked) && (
-            <div className="cue warn">You've outgrown your plates on at least one lift. Add plates in Settings → Equipment when you buy them.</div>
+            <div className="cue warn">You've outgrown your plates on at least one lift. History → Plates shows what buying more would do; add them in Settings → Equipment when they arrive.</div>
           )}
         </div>
       </div>

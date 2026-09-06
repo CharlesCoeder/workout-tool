@@ -7,8 +7,9 @@ import type { SessionRecord } from '../engine/types';
 import { fmtDate, fmtDuration, weightLabel } from '../ui/format';
 import { downloadText, sessionsCsv } from '../lib/csv';
 import { Overview } from './Overview';
+import { PlatesTab } from './PlatesTab';
 
-type Tab = 'overview' | 'lifts' | 'sessions';
+type Tab = 'overview' | 'lifts' | 'sessions' | 'plates';
 type Metric = 'weight' | 'e1rm';
 
 export function HistoryPage() {
@@ -20,6 +21,7 @@ export function HistoryPage() {
     ['overview', 'Overview'],
     ['lifts', 'Lifts'],
     ['sessions', `Sessions (${sessions.length})`],
+    ['plates', 'Plates'],
   ];
   return (
     <div className="page">
@@ -35,6 +37,7 @@ export function HistoryPage() {
       {tab === 'overview' && <Overview />}
       {tab === 'lifts' && <Lifts />}
       {tab === 'sessions' && <Sessions sessions={sessions} />}
+      {tab === 'plates' && <PlatesTab />}
     </div>
   );
 }
