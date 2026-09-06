@@ -19,8 +19,10 @@ import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
 import { BottomSheet } from './Sheet';
 import { LogSheet } from './LogSheet';
+import { WeighSheet } from './WeighSheet';
+import { summarize, todayKey as todayKeyLocal } from '../engine/body';
 
-type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo' | 'log';
+type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo' | 'log' | 'weigh';
 
 export function RemotePage() {
   const app = useApp();
@@ -118,6 +120,7 @@ export function RemotePage() {
         </BottomSheet>
       )}
       {sheet === 'pair' && <PairSheet onClose={closeSheet} onDone={say} />}
+      {sheet === 'weigh' && <WeighSheet onClose={closeSheet} onDone={say} />}
       {toast && <div className="toast">{toast}</div>}
     </>
   );
@@ -125,7 +128,7 @@ export function RemotePage() {
   if (!session) {
     return (
       <div className="remote">
-        <DayPicker onPair={() => setSheet('pair')} />
+        <DayPicker onPair={() => setSheet('pair')} onWeigh={() => setSheet('weigh')} />
         {sheets}
       </div>
     );
@@ -239,13 +242,15 @@ function ExerciseHero({ ex, sub }: { ex: PlannedExercise; sub?: string }) {
   );
 }
 
-function DayPicker({ onPair }: { onPair: () => void }) {
+function DayPicker({ onPair, onWeigh }: { onPair: () => void; onWeigh: () => void }) {
   const app = useApp();
   const suggested = suggestNextDay(app.program, app.history);
   const [busy, setBusy] = useState(false);
   const now = useMemo(() => app.now(), [app.now]);
   const week = useMemo(() => weeklyStats(app.history, app.program, 1, now)[0], [app.history, app.program, now]);
   const c = useMemo(() => consistency(app.history, app.settings.targetSessionsPerWeek, now), [app.history, app.settings.targetSessionsPerWeek, now]);
+  const body = useMemo(() => summarize(app.bodyWeight, now), [app.bodyWeight, now]);
+  const weighedToday = app.bodyWeight.some((e) => e.date === todayKeyLocal(now));
   const plans = useMemo(
     () => Object.fromEntries(app.program.days.map((d) => [d.id, planDay(app.program, d, app.history, app.inventory, app.settings.progressionRule)])),
     [app.program, app.history, app.inventory, app.settings.progressionRule],
@@ -298,6 +303,24 @@ function DayPicker({ onPair }: { onPair: () => void }) {
           </span>
         </div>
       )}
+      <div className="card row spread" style={{ padding: '12px 18px' }}>
+        <span style={{ fontSize: 14 }}>
+          <span className="eyebrow">Body weight</span>
+          <div className="muted">
+            {body.trendLb !== null ? (
+              <>
+                trend {body.trendLb.toFixed(1)} lb
+                {body.weeklyRate !== null && Math.abs(body.weeklyRate) >= 0.1 ? ` · ${body.weeklyRate > 0 ? '+' : ''}${body.weeklyRate.toFixed(1)}/wk` : ''}
+              </>
+            ) : (
+              'no readings yet'
+            )}
+          </div>
+        </span>
+        <button className={`btn small ${weighedToday ? 'ghost' : ''}`} onClick={onWeigh}>
+          {weighedToday ? 'Logged today' : 'Log weight'}
+        </button>
+      </div>
       <div className="days">
         {app.program.days.map((d) => {
           const plan = plans[d.id];

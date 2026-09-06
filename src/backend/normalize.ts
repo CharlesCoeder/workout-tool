@@ -1,6 +1,7 @@
 import type { Exercise, Inventory, PlannedExercise, Program, SessionRecord, SessionState, Settings } from '../engine/types';
 import { DEFAULT_INVENTORY, DEFAULT_PROGRAM, DEFAULT_SETTINGS } from '../engine/defaults';
 import { DEFAULT_DEMO } from '../engine/session';
+import type { BodyWeightEntry } from '../engine/body';
 
 // RTDB drops empty arrays and null keys; these restore the shapes the engine expects.
 
@@ -83,6 +84,14 @@ export function normalizeRecord(r: SessionRecord): SessionRecord {
     completed: !!r.completed,
     exercises: arr<SessionRecord['exercises'][number]>(r.exercises).map((e) => ({ ...e, reps: arr(e.reps) })),
   };
+}
+
+export function normalizeBodyWeight(v: Record<string, { lb: number; at: number }> | null): BodyWeightEntry[] {
+  if (!v) return [];
+  return Object.entries(v)
+    .filter(([date, e]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && e && typeof e.lb === 'number' && e.lb > 0)
+    .map(([date, e]) => ({ date, lb: e.lb, at: e.at ?? 0 }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function normalizeRecords(v: Record<string, SessionRecord> | null): SessionRecord[] {

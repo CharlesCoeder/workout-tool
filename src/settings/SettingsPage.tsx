@@ -598,7 +598,7 @@ function DataTab({ onSaved }: { onSaved: (m?: string) => void }) {
   const [importText, setImportText] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const exportJson = () =>
-    JSON.stringify({ program: app.program, equipment: app.inventory, settings: app.settings, sessions: app.history }, null, 2);
+    JSON.stringify({ program: app.program, equipment: app.inventory, settings: app.settings, sessions: app.history, bodyWeight: app.bodyWeight }, null, 2);
   const doImport = async () => {
     setErr(null);
     try {
@@ -608,6 +608,9 @@ function DataTab({ onSaved }: { onSaved: (m?: string) => void }) {
       if (data.settings) await app.saveSettings(data.settings);
       if (Array.isArray(data.sessions)) {
         for (const s of data.sessions) await app.backend.set(`households/${app.hid}/sessions/${s.id}`, s);
+      }
+      if (Array.isArray(data.bodyWeight)) {
+        for (const e of data.bodyWeight) if (e?.date && e.lb > 0) await app.saveBodyWeight(e.date, e.lb);
       }
       setImportText('');
       onSaved('Imported');

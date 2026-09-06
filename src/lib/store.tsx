@@ -12,6 +12,8 @@ import {
 } from '../backend/normalize';
 import { getStoredHid, randomId, setStoredHid } from './household';
 import { playbackPath } from '../engine/playback';
+import type { BodyWeightEntry } from '../engine/body';
+import { normalizeBodyWeight } from '../backend/normalize';
 
 export interface AppStore {
   backend: Backend;
@@ -25,6 +27,8 @@ export interface AppStore {
   inventory: Inventory;
   settings: Settings;
   history: SessionRecord[];
+  /** Body-weight readings, oldest first, one per day. */
+  bodyWeight: BodyWeightEntry[];
   /** Raw live state (unsettled). Use `useSettled` for rendering. */
   live: SessionState | null;
   now: () => number;
@@ -36,6 +40,8 @@ export interface AppStore {
   saveSettings: (s: Settings) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   clearHistory: () => Promise<void>;
+  saveBodyWeight: (date: string, lb: number) => Promise<void>;
+  deleteBodyWeight: (date: string) => Promise<void>;
 }
 
 const Ctx = createContext<AppStore | null>(null);
@@ -56,6 +62,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [inventoryRaw, setInventoryRaw] = useState<Inventory | null>(null);
   const [settingsRaw, setSettingsRaw] = useState<Settings | null>(null);
   const [historyRaw, setHistoryRaw] = useState<Record<string, SessionRecord> | null>(null);
+  const [bodyRaw, setBodyRaw] = useState<Record<string, { lb: number; at: number }> | null>(null);
   const [live, setLive] = useState<SessionState | null>(null);
   const [loadedFlags, setLoadedFlags] = useState(0);
 
@@ -85,6 +92,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setLive(normalizeSession(v));
         mark(16);
       }),
+      backend.subscribe<Record<string, { lb: number; at: number }>>(`${base}/bodyweight`, (v) => {
+        setBodyRaw(v);
+        mark(32);
+      }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [backend, base]);
@@ -93,7 +104,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const inventory = useMemo(() => normalizeInventory(inventoryRaw), [inventoryRaw]);
   const settings = useMemo(() => normalizeSettings(settingsRaw), [settingsRaw]);
   const history = useMemo(() => normalizeRecords(historyRaw), [historyRaw]);
-  const loaded = loadedFlags === 31;
+  const bodyWeight = useMemo(() => normalizeBodyWeight(bodyRaw), [bodyRaw]);
+  const loaded = loadedFlags === 63;
 
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -167,6 +179,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     inventory,
     settings,
     history,
+    bodyWeight,
     live,
     now,
     dispatch,
@@ -177,6 +190,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveSettings: (s) => backend.set(`${base}/settings`, s),
     deleteSession: (id) => backend.remove(`${base}/sessions/${id}`),
     clearHistory: () => backend.remove(`${base}/sessions`),
+    saveBodyWeight: (date, lb) => backend.set(`${base}/bodyweight/${date}`, { lb, at: backend.now() }),
+    deleteBodyWeight: (date) => backend.remove(`${base}/bodyweight/${date}`),
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -37,6 +37,7 @@ export function TopNav({ current }: { current: string }) {
     ['/remote', 'Remote'],
     ['/tv', 'TV'],
     ['/history', 'History'],
+    ['/body', 'Body'],
     ['/settings', 'Settings'],
   ];
   return (

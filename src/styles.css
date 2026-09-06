@@ -1160,3 +1160,13 @@ table.plain th {
   font-size: 11px;
   padding: 0 4px;
 }
+
+/* ---------- Body ---------- */
+
+.chart.body .raw {
+  fill: var(--fg-3);
+}
+.chart.body .line {
+  stroke: var(--accent);
+  stroke-width: 3;
+}

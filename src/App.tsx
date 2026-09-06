@@ -4,6 +4,7 @@ import { TvPage } from './tv/TvPage';
 import { RemotePage } from './remote/RemotePage';
 import { HistoryPage } from './history/HistoryPage';
 import { SettingsPage } from './settings/SettingsPage';
+import { BodyPage } from './body/BodyPage';
 
 function Landing() {
   const { mode } = useApp();
@@ -20,6 +21,9 @@ function Landing() {
         </Link>
         <Link to="/history" className="btn">
           History
+        </Link>
+        <Link to="/body" className="btn">
+          Body
         </Link>
         <Link to="/settings" className="btn">
           Settings
@@ -39,6 +43,7 @@ export function App() {
   if (path.startsWith('/tv')) return <TvPage />;
   if (path.startsWith('/remote')) return <RemotePage />;
   if (path.startsWith('/history')) return <HistoryPage />;
+  if (path.startsWith('/body')) return <BodyPage />;
   if (path.startsWith('/settings')) return <SettingsPage />;
   return <Landing />;
 }
