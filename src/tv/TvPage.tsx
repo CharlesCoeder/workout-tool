@@ -8,6 +8,7 @@ import { currentExercise, isTimed, progress, remainingMs } from '../engine/sessi
 import { prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
 import { formatLb } from '../engine/plates';
+import { prForSet, sessionPrs, sessionVolume, targetReps, type RepTarget } from '../engine/records';
 import type { DemoPlayback, Inventory, PlannedExercise, Program, SessionRecord, SessionState } from '../engine/types';
 import { Demo, applyDemoCommand, onDemoProgress } from '../ui/Demo';
 import { PlateBar } from '../ui/PlateBar';
@@ -155,7 +156,7 @@ export function TvPage() {
       body = <TvLogging s={session} />;
       break;
     case 'rest':
-      body = <TvRest s={session} now={now} inv={inv} />;
+      body = <TvRest s={session} now={now} inv={inv} history={app.history} />;
       break;
     case 'summary':
       body = <TvSummary s={session} program={app.program} history={app.history} inv={inv} />;
@@ -300,6 +301,23 @@ function Flags({ ex }: { ex: PlannedExercise }) {
   if (ex.substitutedFrom) items.push(<span key="sub" className="badge dim">Substitute</span>);
   if (!items.length) return null;
   return <div className="row wrap">{items}</div>;
+}
+
+/** "Beat the logbook": the rep count to aim for this set, and why. */
+function TargetLine({ target, size = 'big' }: { target: RepTarget | null; size?: 'big' | 'small' }) {
+  if (!target) return null;
+  const why =
+    target.reason === 'beat'
+      ? `one more than last time (${target.lastReps})`
+      : target.reason === 'newWeight'
+        ? 'new weight: clean reps first, add reps next time'
+        : 'top of the range again';
+  return (
+    <div className={`target ${size}`}>
+      <b>Aim for {target.reps}</b>
+      <span className="muted"> · {why}</span>
+    </div>
+  );
 }
 
 function LastTime({ ex }: { ex: PlannedExercise }) {
@@ -481,6 +499,7 @@ function TvWorking({ s }: { s: SessionState }) {
           <div style={{ fontSize: '5vmin', fontWeight: 700 }} className="accent">
             {repsTarget(ex)}
           </div>
+          <TargetLine target={targetReps(ex, s.cursor.set)} />
           <div className="cue">Leave one or two reps in the tank. Stop when the next rep would be ugly.</div>
           <WeightBlock ex={ex} size="small" />
           <SetDots ex={ex} current={s.cursor.set} />
@@ -522,12 +541,14 @@ function TvLogging({ s }: { s: SessionState }) {
   );
 }
 
-function TvRest({ s, now, inv }: { s: SessionState; now: number; inv: Inventory }) {
+function TvRest({ s, now, inv, history }: { s: SessionState; now: number; inv: Inventory; history: SessionRecord[] }) {
   const p = s.phase as Extract<SessionState['phase'], { kind: 'rest' }>;
   const ex = currentExercise(s)!; // cursor already points at the NEXT set
   const sameExercise = s.cursor.set > 0;
-  const prevEx = sameExercise ? ex : s.exercises.slice(0, s.cursor.ex).reverse().find((e) => e.results.length > 0);
+  const prevIndex = sameExercise ? s.cursor.ex : s.exercises.slice(0, s.cursor.ex).map((e) => e.results.length > 0).lastIndexOf(true);
+  const prevEx = prevIndex >= 0 ? s.exercises[prevIndex] : undefined;
   const last = prevEx?.results[prevEx.results.length - 1];
+  const pr = prevEx && last ? prForSet(history, s, prevIndex, prevEx.results.length - 1) : null;
   const plan = useMemo(() => rackPlanFor(s, s.cursor.ex, inv), [s, inv]);
   const rem = remainingMs(s, now);
   return (
@@ -541,8 +562,17 @@ function TvRest({ s, now, inv }: { s: SessionState; now: number; inv: Inventory 
             <div className="muted">
               {prevEx.name}: {last.reps} reps
               {prevEx.load !== 'bodyweight' ? ` at ${formatLb(last.weightLb)} lb` : ''}
-              {last.reps >= prevEx.repMax && prevEx.results.length === 1 && prevEx.load !== 'bodyweight' ? ' · weight goes up next time' : ''}
+              {last.reps >= prevEx.repMax && prevEx.results.length === 1 && prevEx.load !== 'bodyweight'
+                ? prevEx.maxedOut
+                  ? ' · top of the range at your plate ceiling'
+                  : ' · weight goes up next time'
+                : ''}
             </div>
+          )}
+          {pr && (
+            <span className="badge good fade-in" key={`${prevIndex}-${prevEx?.results.length}`}>
+              PR · {pr.label}
+            </span>
           )}
         </div>
         <div className="col side">
@@ -552,6 +582,7 @@ function TvRest({ s, now, inv }: { s: SessionState; now: number; inv: Inventory 
             <div className="muted">
               Set {s.cursor.set + 1} of {ex.sets} · {repsTarget(ex)}
             </div>
+            <TargetLine target={targetReps(ex, s.cursor.set)} size="small" />
             {ex.load !== 'bodyweight' && (
               <>
                 <div style={{ fontSize: '3.6vmin', fontWeight: 700 }}>{weightLabel(ex.weightLb, ex.load)}</div>
@@ -586,14 +617,19 @@ function TvRest({ s, now, inv }: { s: SessionState; now: number; inv: Inventory 
 function TvSummary({ s, program, history, inv }: { s: SessionState; program: Program; history: SessionRecord[]; inv: Inventory }) {
   const rec = toRecord(s);
   const hist = [...history.filter((h) => h.id !== s.id), rec];
+  const prs = sessionPrs(history, s);
   const rows = s.exercises
-    .filter((e) => e.results.length > 0)
-    .map((e) => {
+    .map((e, i) => ({ e, i }))
+    .filter(({ e }) => e.results.length > 0)
+    .map(({ e, i }) => {
       const lib = program.exercises[e.exerciseId];
       const next = lib ? prescribe(lib, hist, inv) : null;
-      return { e, next };
+      const prSets = new Set(prs.filter((p) => p.ex === i).map((p) => p.set));
+      return { e, next, prSets };
     });
   const durationMs = (s.endedAt ?? s.startedAt) - s.startedAt;
+  const volume = sessionVolume(s);
+  const pr = progress(s);
   return (
     <>
       <div className="top">
@@ -604,6 +640,28 @@ function TvSummary({ s, program, history, inv }: { s: SessionState; program: Pro
         <div className="col">
           <div className="eyebrow accent">Session complete</div>
           <div className="exercise small">Nice work. Everything's saved.</div>
+          <div className="stats">
+            <div>
+              <b>{fmtDuration(durationMs)}</b>
+              <span>on the clock</span>
+            </div>
+            <div>
+              <b>{pr.setsDone}</b>
+              <span>sets</span>
+            </div>
+            {volume > 0 && (
+              <div>
+                <b>{volume.toLocaleString()} lb</b>
+                <span>moved</span>
+              </div>
+            )}
+            {prs.length > 0 && (
+              <div>
+                <b className="good">{prs.length}</b>
+                <span>{prs.length === 1 ? 'personal record' : 'personal records'}</span>
+              </div>
+            )}
+          </div>
           <table className="summary">
             <thead>
               <tr>
@@ -614,11 +672,18 @@ function TvSummary({ s, program, history, inv }: { s: SessionState; program: Pro
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ e, next }) => (
+              {rows.map(({ e, next, prSets }) => (
                 <tr key={e.exerciseId}>
                   <td>{e.name}</td>
                   <td>{weightLabel(e.results[0].weightLb, e.load)}</td>
-                  <td>{e.results.map((r) => r.reps).join(', ')}</td>
+                  <td>
+                    {e.results.map((r, k) => (
+                      <span key={k}>
+                        {k > 0 ? ', ' : ''}
+                        {prSets.has(k) ? <b className="good">{r.reps}★</b> : r.reps}
+                      </span>
+                    ))}
+                  </td>
                   <td>
                     {!next || e.load === 'bodyweight' ? (
                       <span className="faint">reps only</span>

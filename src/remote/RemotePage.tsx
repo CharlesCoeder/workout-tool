@@ -6,9 +6,10 @@ import { Link } from '../lib/router';
 import { currentExercise, lastLoggedSet, progress, remainingMs } from '../engine/session';
 import { planDay, planExercise, suggestNextDay } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
+import { prForSet, sessionPrs, sessionVolume, targetReps } from '../engine/records';
 import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
 import { fmtClock, isFresh, playbackPath, positionAt } from '../engine/playback';
-import { fmtCountdown, perEndLabel, repsTarget, weightLabel } from '../ui/format';
+import { fmtCountdown, fmtDuration, perEndLabel, repsTarget, weightLabel } from '../ui/format';
 import { PauseIcon, PlayIcon, RestartIcon, SoundOffIcon, SoundOnIcon } from '../ui/icons';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
@@ -359,9 +360,18 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
   const lo = Math.max(1, ex.repMin - 3);
   const hi = ex.repMax + 4;
   const nums = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+  const target = targetReps(ex, s.cursor.set);
   return (
     <>
       <ExerciseHero ex={ex} sub={`Set ${s.cursor.set + 1} of ${ex.sets} · in progress`} />
+      {target && (
+        <div className="row" style={{ gap: 8 }}>
+          <span className="pill accent">Aim for {target.reps}</span>
+          <span className="muted" style={{ fontSize: 14 }}>
+            {target.reason === 'beat' ? `one more than last time (${target.lastReps})` : target.reason === 'newWeight' ? 'new weight, clean reps first' : 'top of the range again'}
+          </span>
+        </div>
+      )}
       <div className="muted" style={{ fontSize: 15 }}>
         How many reps did you get{ex.perSide ? ' (per side)' : ''}? Tap the number when you're done.
       </div>
@@ -369,7 +379,7 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
         {nums.map((n) => (
           <button
             key={n}
-            className={n >= ex.repMax ? 'top' : n >= ex.repMin ? 'in' : ''}
+            className={`${n >= ex.repMax ? 'top' : n >= ex.repMin ? 'in' : ''} ${target && n === target.reps ? 'target' : ''}`}
             onClick={() => void app.dispatch({ type: 'logReps', reps: n })}
           >
             {n}
@@ -405,6 +415,8 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
   const plan = rackPlanFor(s, s.cursor.ex, app.inventory);
   const sameExercise = s.cursor.set > 0;
   const last = lastLoggedSet(s);
+  const pr = last ? prForSet(app.history, s, last.ex, last.set) : null;
+  const target = targetReps(ex, s.cursor.set);
   return (
     <>
       <div className="hero">
@@ -421,11 +433,22 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
           </button>
         </div>
       )}
+      {pr && (
+        <div className="row" style={{ justifyContent: 'center' }}>
+          <span className="pill good">PR · {pr.label}</span>
+        </div>
+      )}
       <div className="card stack" style={{ gap: 8 }}>
         <div className="eyebrow">{sameExercise ? 'Next' : 'Next up'}</div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>{ex.name}</div>
         <div className="muted">
           Set {s.cursor.set + 1} of {ex.sets} · {repsTarget(ex)}
+          {target && (
+            <>
+              {' '}
+              · aim for <b style={{ color: 'var(--fg)' }}>{target.reps}</b>
+            </>
+          )}
         </div>
         {ex.load !== 'bodyweight' && (
           <div style={{ fontSize: 18, fontWeight: 600 }}>
@@ -465,26 +488,63 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
 
 function SummaryControls({ s, onEdit }: { s: SessionState; onEdit: () => void }) {
   const app = useApp();
-  const done = s.exercises.filter((e) => e.results.length > 0);
+  const done = s.exercises.map((e, i) => ({ e, i })).filter(({ e }) => e.results.length > 0);
+  const prs = sessionPrs(app.history, s);
+  const volume = sessionVolume(s);
+  const pr = progress(s);
   return (
     <>
       <div className="hero">
         <div className="eyebrow accent">Session complete</div>
         <div className="name">Nice work.</div>
       </div>
-      <div className="card stack" style={{ gap: 8 }}>
-        {done.map((e) => (
-          <div key={e.exerciseId} className="stack" style={{ gap: 2 }}>
-            <div className="row spread">
-              <span>{e.name}</span>
-              <span className="muted">
-                {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
-                {e.results.map((r) => r.reps).join(', ')}
-              </span>
-            </div>
-            {e.note && <div className="faint" style={{ fontSize: 13 }}>{e.note}</div>}
+      <div className="stats">
+        <div>
+          <b>{fmtDuration((s.endedAt ?? s.startedAt) - s.startedAt)}</b>
+          <span>on the clock</span>
+        </div>
+        <div>
+          <b>{pr.setsDone}</b>
+          <span>sets</span>
+        </div>
+        {volume > 0 && (
+          <div>
+            <b>{volume.toLocaleString()}</b>
+            <span>lb moved</span>
           </div>
-        ))}
+        )}
+        {prs.length > 0 && (
+          <div>
+            <b className="good">{prs.length}</b>
+            <span>{prs.length === 1 ? 'PR' : 'PRs'}</span>
+          </div>
+        )}
+      </div>
+      <div className="card stack" style={{ gap: 8 }}>
+        {done.map(({ e, i }) => {
+          const mine = prs.filter((p) => p.ex === i);
+          return (
+            <div key={e.exerciseId} className="stack" style={{ gap: 4 }}>
+              <div className="row spread">
+                <span>{e.name}</span>
+                <span className="muted">
+                  {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
+                  {e.results.map((r) => r.reps).join(', ')}
+                </span>
+              </div>
+              {mine.length > 0 && (
+                <div className="row wrap" style={{ gap: 6 }}>
+                  {mine.map((p) => (
+                    <span key={p.set} className="pill good">
+                      Set {p.set + 1} · {p.pr.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {e.note && <div className="faint" style={{ fontSize: 13 }}>{e.note}</div>}
+            </div>
+          );
+        })}
         {!done.length && <span className="muted">Nothing logged.</span>}
         {s.note && <div className="muted" style={{ fontSize: 14, borderTop: '1px solid var(--line)', paddingTop: 8 }}>{s.note}</div>}
       </div>
