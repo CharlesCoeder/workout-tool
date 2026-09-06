@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { KEY_HINT, keyAction } from './keys';
+import { planDay } from '../engine/plan';
 import { useApp, useSettled } from '../lib/store';
 import { hostPairing } from '../lib/pairing';
 import { beep, unlockAudio } from '../lib/beep';
@@ -7,6 +9,7 @@ import { playbackPath, shouldPublish } from '../engine/playback';
 import { currentExercise, isStale, isTimed, progress, remainingMs } from '../engine/session';
 import { STALL_SESSIONS, prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
+import { estimateSessionMs, typicalDurationMs } from '../engine/stats';
 import { formatLb } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps, type RepTarget } from '../engine/records';
 import type { DemoPlayback, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from '../engine/types';
@@ -67,6 +70,37 @@ export function TvPage() {
   useEffect(() => onUserActivation(unlockAudio), []);
 
   const voice = useVoice(app.settings.voiceEnabled, session, app.dispatch);
+
+  // Keyboard, for a laptop casting this tab. Digits typed towards a rep count are shown briefly.
+  const [typed, setTyped] = useState('');
+  const typedRef = useRef('');
+  const sessionForKeys = useRef(session);
+  sessionForKeys.current = session;
+  useEffect(() => {
+    let clear: ReturnType<typeof setTimeout> | null = null;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const r = keyAction(e.key, sessionForKeys.current, typedRef.current);
+      if (r.action || r.buffer !== typedRef.current || e.key === ' ' || e.key === 'Enter') e.preventDefault();
+      typedRef.current = r.buffer;
+      setTyped(r.buffer);
+      if (clear) clearTimeout(clear);
+      if (r.buffer) {
+        clear = setTimeout(() => {
+          typedRef.current = '';
+          setTyped('');
+        }, 4000);
+      }
+      if (r.action) void app.dispatch(r.action);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (clear) clearTimeout(clear);
+    };
+  }, [app.dispatch]);
 
   // One-shot demo commands from the remote (seek, restart, play/pause).
   const lastSeq = useRef<number>(-1);
@@ -138,7 +172,20 @@ export function TvPage() {
   const staleHint = session && isStale(session, now) ? 'This session has been idle for hours: the phone offers to discard it' : '';
   const voiceHint = app.settings.voiceEnabled ? voice.status : '';
 
-  if (!session) return <TvIdle code={code} mode={app.mode} program={app.program} history={app.history} hint={soundHint} voiceHint={voiceHint} />;
+  if (!session)
+    return (
+      <TvIdle
+        code={code}
+        mode={app.mode}
+        program={app.program}
+        history={app.history}
+        inv={app.inventory}
+        rule={app.settings.progressionRule}
+        settings={app.settings}
+        hint={soundHint}
+        voiceHint={voiceHint}
+      />
+    );
 
   const inv = app.inventory;
   const p = session.phase;
@@ -208,6 +255,13 @@ export function TvPage() {
           <span className="hint">resume from your phone</span>
         </div>
       )}
+      {typed && (
+        <div className="typed">
+          <span className="eyebrow">Reps</span>
+          <b>{typed}</b>
+          <span className="hint">Enter to log</span>
+        </div>
+      )}
       {(soundHint || voiceHint || staleHint) && (
         <div style={{ position: 'fixed', right: '5vmin', bottom: '1.5vmin' }} className="hint">
           {[staleHint, voiceHint, soundHint].filter(Boolean).join(' · ')}
@@ -238,8 +292,34 @@ function ProgressBar({ s }: { s: SessionState }) {
   const pr = progress(s);
   const pct = pr.setsTotal ? (pr.setsDone / pr.setsTotal) * 100 : 0;
   return (
-    <div className="progress">
-      <i style={{ width: `${pct}%` }} />
+    <>
+      <DayStrip s={s} />
+      <div className="progress">
+        <i style={{ width: `${pct}%` }} />
+      </div>
+    </>
+  );
+}
+
+/** The whole day in one line: what's done, what's now, what's still to come. */
+function DayStrip({ s }: { s: SessionState }) {
+  return (
+    <div className="daystrip">
+      {s.exercises.map((e, i) => {
+        const done = !e.skipped && e.results.length >= e.sets;
+        const now = i === s.cursor.ex && s.phase.kind !== 'summary';
+        const cls = e.skipped ? 'skipped' : done ? 'done' : now ? 'now' : '';
+        return (
+          <span key={`${e.exerciseId}-${i}`} className={`ds ${cls}`}>
+            <span className="name">{e.name}</span>
+            {(now || (!done && e.results.length > 0)) && !e.skipped && (
+              <span className="sets">
+                {Math.min(e.results.length, e.sets)}/{e.sets}
+              </span>
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -353,6 +433,9 @@ function TvIdle({
   mode,
   program,
   history,
+  inv,
+  rule,
+  settings,
   hint,
   voiceHint,
 }: {
@@ -360,12 +443,17 @@ function TvIdle({
   mode: 'local' | 'firebase';
   program: Program;
   history: SessionRecord[];
+  inv: Inventory;
+  rule: ProgressionRule;
+  settings: { readySec: number; rerackBonusSec: number };
   hint: string;
   voiceHint: string;
 }) {
   const next = suggestNextDay(program, history);
   const last = [...history].sort((a, b) => b.startedAt - a.startedAt)[0];
   const host = window.location.host;
+  const plan = useMemo(() => (next ? planDay(program, next, history, inv, rule) : []), [program, next, history, inv, rule]);
+  const length = next ? (typicalDurationMs(history, next.id) ?? estimateSessionMs(plan, program.warmup, settings)) : 0;
   return (
     <div className="tv">
       <div className="top">
@@ -377,12 +465,21 @@ function TvIdle({
           <div className="eyebrow accent">Ready when you are</div>
           <div className="exercise">{next ? next.name : 'No program yet'}</div>
           {next && (
-            <div className="cue" style={{ textAlign: 'center' }}>
-              {next.entries.map((e) => program.exercises[e.exerciseId]?.name).filter(Boolean).join(' · ')}
+            <div className="idle-plan">
+              {plan.map((e) => (
+                <span key={e.exerciseId} className="row" style={{ gap: '0.8vmin' }}>
+                  <span>{e.name}</span>
+                  {e.load !== 'bodyweight' && (
+                    <span className="muted">
+                      {formatLb(e.weightLb)} lb{e.progressed ? ' ▲' : ''}
+                    </span>
+                  )}
+                </span>
+              ))}
             </div>
           )}
-          <div className="muted" style={{ marginTop: '4vmin' }}>
-            Tap a day on your phone to start
+          <div className="muted" style={{ marginTop: '3vmin' }}>
+            {length ? `About ${Math.round(length / 60_000)} minutes. ` : ''}Tap a day on your phone to start
           </div>
         </div>
       </div>
@@ -454,6 +551,7 @@ function TvWarmup({ s, now, inv }: { s: SessionState; now: number; inv: Inventor
       <div className="bottom">
         <div className="hint">Easy pace. This is just to get warm.</div>
       </div>
+      <DayStrip s={s} />
     </>
   );
 }
@@ -491,6 +589,7 @@ function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory
       </div>
       <div className="bottom">
         <div className="hint">Starts on its own. Tap "Go" on your phone to start sooner.</div>
+        <div className="hint faint keyhint">{KEY_HINT}</div>
       </div>
       <ProgressBar s={s} />
     </>
