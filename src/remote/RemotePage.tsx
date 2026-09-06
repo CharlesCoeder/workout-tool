@@ -7,6 +7,7 @@ import { currentExercise, lastLoggedSet, progress, remainingMs } from '../engine
 import { planDay, planExercise, suggestNextDay } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps } from '../engine/records';
+import { STALL_SESSIONS } from '../engine/progression';
 import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
 import { fmtClock, isFresh, playbackPath, positionAt } from '../engine/playback';
 import { fmtCountdown, fmtDuration, perEndLabel, repsTarget, weightLabel } from '../ui/format';
@@ -201,6 +202,7 @@ function ExerciseHero({ ex, sub }: { ex: PlannedExercise; sub?: string }) {
         {ex.progressed && <span className="pill good">▲ up from last time</span>}
         {ex.blocked && <span className="pill warn">maxed out on your plates</span>}
         {!ex.blocked && ex.maxedOut && ex.load !== 'bodyweight' && <span className="pill warn">at your plate ceiling</span>}
+        {ex.stalled >= STALL_SESSIONS && <span className="pill warn">no progress · {ex.stalled} sessions</span>}
         {ex.weightLb !== ex.prescribedLb && <span className="pill">overridden</span>}
       </div>
     </div>
@@ -212,8 +214,8 @@ function DayPicker({ onPair }: { onPair: () => void }) {
   const suggested = suggestNextDay(app.program, app.history);
   const [busy, setBusy] = useState(false);
   const plans = useMemo(
-    () => Object.fromEntries(app.program.days.map((d) => [d.id, planDay(app.program, d, app.history, app.inventory)])),
-    [app.program, app.history, app.inventory],
+    () => Object.fromEntries(app.program.days.map((d) => [d.id, planDay(app.program, d, app.history, app.inventory, app.settings.progressionRule)])),
+    [app.program, app.history, app.inventory, app.settings.progressionRule],
   );
   const start = async (d: Day) => {
     setBusy(true);
@@ -615,7 +617,7 @@ function SwapSheet({
     .sort((a, b) => a.name.localeCompare(b.name));
   const pick = async (id: string) => {
     const target = lib[id];
-    const planned = planExercise(target, app.history, app.inventory, { sets: ex.sets }, ex.loading?.perEnd);
+    const planned = planExercise(target, app.history, app.inventory, { sets: ex.sets }, ex.loading?.perEnd, app.settings.progressionRule);
     await app.dispatch({ type: 'substitute', exercise: planned });
     onDone(`Swapped to ${target.name}`);
     onClose();

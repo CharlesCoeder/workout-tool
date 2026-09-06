@@ -1,4 +1,4 @@
-import type { Day, Exercise, Inventory, PlannedExercise, Program, SessionRecord, SessionState } from './types';
+import type { Day, Exercise, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from './types';
 import { createSession } from './session';
 import { loadingFor } from './plates';
 import { prescribe } from './progression';
@@ -10,9 +10,10 @@ export function planExercise(
   inv: Inventory,
   overrides: { sets?: number; repMin?: number; repMax?: number } = {},
   prevPerEnd?: number[],
+  rule: ProgressionRule = 'firstSet',
 ): PlannedExercise {
   const repMax = overrides.repMax ?? ex.repMax;
-  const pres = prescribe(ex, history, inv, repMax);
+  const pres = prescribe(ex, history, inv, repMax, rule);
   const loading = ex.load === 'bodyweight' ? null : loadingFor(inv, ex.load, pres.weightLb, prevPerEnd);
   return {
     exerciseId: ex.id,
@@ -32,18 +33,19 @@ export function planExercise(
     maxedOut: pres.maxedOut,
     blocked: pres.blocked,
     progressed: pres.progressed,
+    stalled: pres.stalled,
     lastTime: pres.lastTime,
     results: [],
   };
 }
 
-export function planDay(program: Program, day: Day, history: SessionRecord[], inv: Inventory): PlannedExercise[] {
+export function planDay(program: Program, day: Day, history: SessionRecord[], inv: Inventory, rule: ProgressionRule = 'firstSet'): PlannedExercise[] {
   const out: PlannedExercise[] = [];
   let prevPerEnd: number[] | undefined;
   for (const entry of day.entries) {
     const ex = program.exercises[entry.exerciseId];
     if (!ex) continue;
-    const planned = planExercise(ex, history, inv, entry, prevPerEnd);
+    const planned = planExercise(ex, history, inv, entry, prevPerEnd, rule);
     if (planned.loading) prevPerEnd = planned.loading.perEnd;
     out.push(planned);
   }
@@ -57,10 +59,11 @@ export function planSession(
   inv: Inventory,
   now: number,
   id = `${now}-${Math.random().toString(36).slice(2, 8)}`,
+  rule: ProgressionRule = 'firstSet',
 ): SessionState {
   const day = program.days.find((d) => d.id === dayId);
   if (!day) throw new Error(`Unknown day ${dayId}`);
-  return createSession({ id, dayId, dayName: day.name, warmup: program.warmup, exercises: planDay(program, day, history, inv) }, now);
+  return createSession({ id, dayId, dayName: day.name, warmup: program.warmup, exercises: planDay(program, day, history, inv, rule) }, now);
 }
 
 /** Convert a live session into the history record shape. */

@@ -24,7 +24,7 @@ export function SettingsPage() {
     ['program', 'Program'],
     ['exercises', 'Exercises'],
     ['equipment', 'Equipment'],
-    ['timing', 'Timing & voice'],
+    ['timing', 'Timing & rules'],
     ['data', 'Data'],
   ];
   return (
@@ -524,6 +524,19 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
   };
   return (
     <div className="stack">
+      <div className="card stack">
+        <h3 style={{ margin: 0 }}>Progression</h3>
+        <div className="field">
+          <label>When does a lift earn its next plate step?</label>
+          <select value={s.progressionRule} onChange={(e) => save({ progressionRule: e.target.value as Settings['progressionRule'] })}>
+            <option value="firstSet">First set reaches the top of the rep range (the program's rule)</option>
+            <option value="allSets">Every set reaches the top of the rep range (stricter, slower)</option>
+          </select>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Either way the weight only ever goes up on its own. If a lift goes three sessions without beating the session before (first-set reps or total reps), the TV says so and suggests a step down for a session; it never changes the weight for you.
+        </p>
+      </div>
       <div className="card stack">
         <div className="field">
           <label>"Get ready" countdown before the first set (seconds)</label>

@@ -86,3 +86,36 @@ describe('progression rule', () => {
     expect(p.lastTime?.reps).toEqual([25, 20, 18]);
   });
 });
+
+describe('progression rule and stalls', () => {
+  it('"all sets" needs every set at the top', () => {
+    const hist = [session(1, 'squat', 9, [12, 12, 11])];
+    expect(prescribe(squat, hist, inv, undefined, 'firstSet')).toMatchObject({ weightLb: 14, progressed: true });
+    expect(prescribe(squat, hist, inv, undefined, 'allSets')).toMatchObject({ weightLb: 9, progressed: false });
+    expect(prescribe(squat, [session(1, 'squat', 9, [12, 12, 12])], inv, undefined, 'allSets')).toMatchObject({ weightLb: 14, progressed: true });
+  });
+
+  it('climbing the rep range is progress, not a stall', () => {
+    const hist = [session(1, 'squat', 9, [12, 10, 9]), session(2, 'squat', 14, [9, 8, 7]), session(3, 'squat', 14, [10, 8, 7]), session(4, 'squat', 14, [10, 9, 8])];
+    expect(prescribe(squat, hist, inv)).toMatchObject({ weightLb: 14, progressed: false, stalled: 0 });
+  });
+
+  it('counts sessions in a row that failed to beat the one before', () => {
+    const hist = [
+      session(1, 'squat', 9, [12, 10, 9]), // earned → moved to 14
+      session(2, 'squat', 14, [9, 8, 7]),
+      session(3, 'squat', 14, [9, 8, 7]), // no better
+      session(4, 'squat', 14, [9, 7, 7]), // worse
+      session(5, 'squat', 14, [8, 8, 7]), // same total, first set down
+    ];
+    expect(prescribe(squat, hist, inv)).toMatchObject({ weightLb: 14, progressed: false, stalled: 3 });
+    // any improvement resets the count: one more rep in total is enough
+    expect(prescribe(squat, [...hist, session(6, 'squat', 14, [8, 8, 8])], inv).stalled).toBe(0);
+    // earning the step resets it too
+    expect(prescribe(squat, [...hist, session(6, 'squat', 14, [12, 9, 8])], inv)).toMatchObject({ weightLb: 19, progressed: true, stalled: 0 });
+    // a session at a different weight breaks the run
+    expect(prescribe(squat, [session(1, 'squat', 14, [8, 8, 8]), session(2, 'squat', 9, [8, 8, 8]), session(3, 'squat', 14, [8, 8, 8])], inv).stalled).toBe(0);
+    expect(prescribe(squat, [session(1, 'squat', 14, [8, 8, 8]), session(2, 'squat', 14, [8, 8, 8])], inv).stalled).toBe(1);
+    expect(prescribe(squat, [], inv).stalled).toBe(0);
+  });
+});

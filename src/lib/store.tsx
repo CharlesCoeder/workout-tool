@@ -134,12 +134,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startSession = useCallback(
     async (dayId: string) => {
-      const s = planSession(program, dayId, history, inventory, backend.now());
+      const s = planSession(program, dayId, history, inventory, backend.now(), undefined, settings.progressionRule);
       liveRef.current = s;
       setLive(s);
       await backend.set(`${base}/live`, s);
     },
-    [backend, base, program, history, inventory],
+    [backend, base, program, history, inventory, settings.progressionRule],
   );
 
   const clearLive = useCallback(async () => {

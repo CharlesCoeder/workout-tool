@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   logRestSec: 0,
   voiceEnabled: false,
   countdownBeeps: true,
+  progressionRule: 'firstSet',
 };
 
 // Public YouTube demos (muted, looping embeds). Replace with your own clips in Settings → Exercises.

@@ -5,11 +5,11 @@ import { beep, unlockAudio } from '../lib/beep';
 import { onUserActivation, useUserActivated } from '../lib/activation';
 import { playbackPath, shouldPublish } from '../engine/playback';
 import { currentExercise, isTimed, progress, remainingMs } from '../engine/session';
-import { prescribe } from '../engine/progression';
+import { STALL_SESSIONS, prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
 import { formatLb } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps, type RepTarget } from '../engine/records';
-import type { DemoPlayback, Inventory, PlannedExercise, Program, SessionRecord, SessionState } from '../engine/types';
+import type { DemoPlayback, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from '../engine/types';
 import { Demo, applyDemoCommand, onDemoProgress } from '../ui/Demo';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
@@ -159,7 +159,7 @@ export function TvPage() {
       body = <TvRest s={session} now={now} inv={inv} history={app.history} />;
       break;
     case 'summary':
-      body = <TvSummary s={session} program={app.program} history={app.history} inv={inv} />;
+      body = <TvSummary s={session} program={app.program} history={app.history} inv={inv} rule={app.settings.progressionRule} />;
       break;
   }
 
@@ -299,8 +299,22 @@ function Flags({ ex }: { ex: PlannedExercise }) {
   if (ex.blocked) items.push(<span key="blocked" className="badge warn">Earned a bump · maxed out on your current plates</span>);
   else if (ex.maxedOut && ex.load !== 'bodyweight') items.push(<span key="max" className="badge warn">Maxed out on your current plates</span>);
   if (ex.substitutedFrom) items.push(<span key="sub" className="badge dim">Substitute</span>);
+  if (ex.stalled >= STALL_SESSIONS) items.push(<span key="stall" className="badge warn">No progress for {ex.stalled} sessions</span>);
   if (!items.length) return null;
   return <div className="row wrap">{items}</div>;
+}
+
+/** Shown on the get-ready screen when a lift has sat at one weight for three sessions or more. */
+function StallAdvice({ ex }: { ex: PlannedExercise }) {
+  if (ex.stalled < STALL_SESSIONS || ex.load === 'bodyweight') return null;
+  const advice = ex.maxedOut
+    ? 'Even one more rep in total counts. Sleep and food move this more than anything.'
+    : 'Go for one more rep than last time. If it stalls again, take one step down for a session and build back up.';
+  return (
+    <div className="cue warn" style={{ fontSize: '2.6vmin' }}>
+      {ex.stalled} sessions at {formatLb(ex.weightLb)} lb without beating the one before. {advice}
+    </div>
+  );
 }
 
 /** "Beat the logbook": the rep count to aim for this set, and why. */
@@ -463,6 +477,7 @@ function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory
           <WeightBlock ex={ex} showPerEnd={plan.changes.length === 0} />
           <RackChanges changes={plan.changes} handles={inv.handles} />
           <Flags ex={ex} />
+          <StallAdvice ex={ex} />
           <div className="cue" style={{ fontSize: '2.7vmin' }}>{ex.cue}</div>
           <LastTime ex={ex} />
         </div>
@@ -614,7 +629,7 @@ function TvRest({ s, now, inv, history }: { s: SessionState; now: number; inv: I
   );
 }
 
-function TvSummary({ s, program, history, inv }: { s: SessionState; program: Program; history: SessionRecord[]; inv: Inventory }) {
+function TvSummary({ s, program, history, inv, rule }: { s: SessionState; program: Program; history: SessionRecord[]; inv: Inventory; rule: ProgressionRule }) {
   const rec = toRecord(s);
   const hist = [...history.filter((h) => h.id !== s.id), rec];
   const prs = sessionPrs(history, s);
@@ -623,7 +638,7 @@ function TvSummary({ s, program, history, inv }: { s: SessionState; program: Pro
     .filter(({ e }) => e.results.length > 0)
     .map(({ e, i }) => {
       const lib = program.exercises[e.exerciseId];
-      const next = lib ? prescribe(lib, hist, inv) : null;
+      const next = lib ? prescribe(lib, hist, inv, undefined, rule) : null;
       const prSets = new Set(prs.filter((p) => p.ex === i).map((p) => p.set));
       return { e, next, prSets };
     });

@@ -26,6 +26,7 @@ function planned(overrides: Partial<PlannedExercise>): PlannedExercise {
     maxedOut: false,
     blocked: false,
     progressed: false,
+    stalled: 0,
     lastTime: null,
     results: [],
     ...overrides,

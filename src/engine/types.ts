@@ -73,12 +73,16 @@ export interface Program {
   warmup: WarmupStep[];
 }
 
+/** When a lift earns its next plate step: the first set reaches the top of the range, or every set does. */
+export type ProgressionRule = 'firstSet' | 'allSets';
+
 export interface Settings {
   readySec: number;
   rerackBonusSec: number;
   logRestSec: number; // extra rest granted when using "done"→"how many" path? (unused, keep 0)
   voiceEnabled: boolean;
   countdownBeeps: boolean;
+  progressionRule: ProgressionRule;
 }
 
 // ---------- Session ----------
@@ -107,6 +111,8 @@ export interface PlannedExercise {
   maxedOut: boolean;
   blocked: boolean;
   progressed: boolean;
+  /** Consecutive recent sessions at this weight without earning a step (0 = progressing). */
+  stalled: number;
   lastTime: { weightLb: number; reps: number[] } | null;
   results: SetResult[];
   skipped?: boolean;

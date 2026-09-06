@@ -56,6 +56,7 @@ export function normalizePlanned(e: PlannedExercise): PlannedExercise {
     loading: e.loading ? { perEnd: arr<number>(e.loading.perEnd), dumbbellLb: e.loading.dumbbellLb } : null,
     substitutes: arr(e.substitutes),
     results: arr(e.results),
+    stalled: e.stalled ?? 0,
     lastTime: e.lastTime ? { weightLb: e.lastTime.weightLb, reps: arr(e.lastTime.reps) } : null,
     demo: e.demo ?? null,
   };
