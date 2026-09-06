@@ -8,7 +8,7 @@ export interface SessionOptions {
 
 export const DEFAULT_OPTIONS: SessionOptions = { readySec: 20, rerackBonusSec: 30 };
 
-export const DEFAULT_DEMO: DemoState = { enlarged: false, rate: 1, seq: 0, cmd: null };
+export const DEFAULT_DEMO: DemoState = { enlarged: false, rate: 1, muted: false, seq: 0, cmd: null };
 
 // ---------- Creation ----------
 
@@ -162,6 +162,7 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
   if (a.type === 'showDemo') return s.demo.enlarged ? s : { ...s, demo: { ...s.demo, enlarged: true } };
   if (a.type === 'hideDemo') return s.demo.enlarged ? { ...s, demo: { ...s.demo, enlarged: false } } : s;
   if (a.type === 'demoRate') return { ...s, demo: { ...s.demo, rate: Math.min(2, Math.max(0.25, a.rate)) } };
+  if (a.type === 'demoMuted') return s.demo.muted === a.muted ? s : { ...s, demo: { ...s.demo, muted: a.muted } };
   if (a.type === 'demoCommand') return { ...s, demo: { ...s.demo, seq: s.demo.seq + 1, cmd: a.cmd } };
 
   if (s.paused) return s; // everything else waits for resume

@@ -11,6 +11,7 @@ import {
   normalizeSettings,
 } from '../backend/normalize';
 import { getStoredHid, randomId, setStoredHid } from './household';
+import { playbackPath } from '../engine/playback';
 
 export interface AppStore {
   backend: Backend;
@@ -142,7 +143,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     liveRef.current = null;
     setLive(null);
     await backend.remove(`${base}/live`);
-  }, [backend, base, persistRecord]);
+    await backend.remove(playbackPath(hid));
+  }, [backend, base, hid, persistRecord]);
 
   const setHid = useCallback((h: string) => {
     setStoredHid(h);

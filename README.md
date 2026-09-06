@@ -31,8 +31,8 @@ npm run build   # typecheck + production build into dist/
 
 ## Using it
 
-- **TV page** (`/tv`): display only. Warm-up → get ready → set → rest → summary. Click once on it after opening to enable the countdown beeps (browser autoplay rule).
-- **Remote** (`/remote`): pick a day; then the only things you do are tap "Go" if you don't want to wait, tap the rep count after each set, and occasionally "Skip rest". "More" has weight override (snapped to your plates), swap, skip, pause, end. "Demo video" puts the clip full-screen on the TV and gives you restart, ±5 s, play/pause, slow motion, and a pause-timer button.
+- **TV page** (`/tv`): display only. Warm-up → get ready → set → rest → summary. Click once on it after opening to enable sound, both the countdown beeps and the demo clips' audio (browser autoplay rule).
+- **Remote** (`/remote`): pick a day; then the only things you do are tap "Go" if you don't want to wait, tap the rep count after each set, and occasionally "Skip rest". "More" has weight override (snapped to your plates), swap, skip, pause, end. "Demo video" puts the clip full-screen on the TV and gives you a scrubber, restart, ±5 s, play/pause, sound on/off, speed from 0.25× to 2×, and a pause-timer button.
 - **History** (`/history`): every session, and a chart per lift with the plate ceiling drawn in.
 - **Settings** (`/settings`): program days, exercise library (sets, reps, rest, cue, demo, substitutes, pair/single), plate inventory, timing, beeps, voice, backup/restore.
 

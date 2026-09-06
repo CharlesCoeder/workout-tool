@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useApp, useSettled } from '../lib/store';
 import { useWakeLock } from '../lib/useWakeLock';
 import { joinPairing } from '../lib/pairing';
@@ -6,8 +6,10 @@ import { Link } from '../lib/router';
 import { currentExercise, progress, remainingMs } from '../engine/session';
 import { planDay, planExercise, suggestNextDay } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
-import type { Day, DemoCommand, PlannedExercise, SessionState } from '../engine/types';
+import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
+import { fmtClock, isFresh, playbackPath, positionAt } from '../engine/playback';
 import { fmtCountdown, perEndLabel, repsTarget, weightLabel } from '../ui/format';
+import { PauseIcon, PlayIcon, RestartIcon, SoundOffIcon, SoundOnIcon } from '../ui/icons';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
@@ -88,7 +90,7 @@ export function RemotePage() {
         </BottomSheet>
       )}
       {sheet === 'weight' && session && ex && <WeightSheet ex={ex} onClose={closeSheet} onDone={say} />}
-      {sheet === 'demo' && session && ex && <DemoSheet session={session} ex={ex} onClose={closeSheet} />}
+      {sheet === 'demo' && session && ex && <DemoSheet session={session} ex={ex} now={now} onClose={closeSheet} />}
       {sheet === 'swap' && session && ex && <SwapSheet session={session} ex={ex} onClose={closeSheet} onDone={say} />}
       {sheet === 'end' && (
         <BottomSheet onClose={closeSheet} title="End the session?">
@@ -579,13 +581,92 @@ function SwapSheet({
   );
 }
 
-const RATES = [0.25, 0.5, 0.75, 1];
+// The steps YouTube's player accepts; the native <video> path takes any of them too.
+const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
-function DemoSheet({ session, ex, onClose }: { session: SessionState; ex: PlannedExercise; onClose: () => void }) {
+/** The TV's playback feed for this household (see `DemoPlayback`). */
+function usePlayback(): DemoPlayback | null {
+  const app = useApp();
+  const [pb, setPb] = useState<DemoPlayback | null>(null);
+  useEffect(() => app.backend.subscribe<DemoPlayback>(playbackPath(app.hid), setPb), [app.backend, app.hid]);
+  return pb;
+}
+
+/** How long a tap's optimistic state is trusted over the TV's feed. */
+const OPTIMISTIC_MS = 3000;
+
+function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: PlannedExercise; now: number; onClose: () => void }) {
   const app = useApp();
   const d = session.demo;
   const cmd = (c: DemoCommand) => void app.dispatch({ type: 'demoCommand', cmd: c });
   const timed = session.phase.kind === 'rest' || session.phase.kind === 'ready' || session.phase.kind === 'warmup';
+
+  const feed = usePlayback();
+  const fresh = isFresh(feed, session.id, ex.exerciseId, now);
+  const duration = fresh ? feed.duration : 0;
+
+  // The feed lags a tap by up to a second, so a tap's effect is shown at once and kept
+  // until the TV reports something that agrees with it (or a few seconds pass).
+  const [flip, setFlip] = useState<{ playing: boolean; at: number } | null>(null);
+  const [seek, setSeek] = useState<{ to: number; at: number } | null>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const dragRef = useRef<number | null>(null);
+
+  let playing = fresh ? feed.playing : false;
+  if (flip && fresh && now - flip.at < OPTIMISTIC_MS && !(feed.at > flip.at && feed.playing === flip.playing)) playing = flip.playing;
+  let pos = fresh ? positionAt(feed, now) : 0;
+  if (seek && fresh && now - seek.at < OPTIMISTIC_MS) {
+    const expected = seek.to + (playing ? ((now - seek.at) / 1000) * feed.rate : 0);
+    if (!(feed.at > seek.at && Math.abs(pos - expected) < 2)) pos = Math.min(expected, duration || expected);
+  }
+  if (drag !== null) pos = drag;
+
+  const nowRef = useRef(now);
+  nowRef.current = now;
+  const start = ex.demo?.type === 'youtube' ? (ex.demo.start ?? 0) : 0;
+  const clampPos = (v: number) => Math.max(0, duration > 0 ? Math.min(duration, v) : v);
+  const showAt = (to: number, playingNow: boolean) => {
+    setSeek({ to, at: nowRef.current });
+    setFlip({ playing: playingNow, at: nowRef.current });
+  };
+
+  const onDrag = (v: number) => {
+    dragRef.current = v;
+    setDrag(v);
+  };
+  const commit = () => {
+    const v = dragRef.current;
+    if (v === null) return;
+    dragRef.current = null;
+    setDrag(null);
+    setSeek({ to: v, at: nowRef.current });
+    cmd({ type: 'seekTo', seconds: v });
+  };
+  // The native `change` event fires once when a drag ends, even if the finger or pointer
+  // is released outside the slider, so a drag can never be left half-finished.
+  const slider = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const el = slider.current;
+    if (!el) return;
+    el.addEventListener('change', commit);
+    return () => el.removeEventListener('change', commit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const nudge = (seconds: number) => {
+    showAt(clampPos(pos + seconds), true);
+    cmd({ type: 'seekBy', seconds });
+  };
+  const restart = () => {
+    showAt(start, true);
+    cmd({ type: 'restart' });
+  };
+  const playPause = () => {
+    setFlip({ playing: !playing, at: now });
+    cmd(fresh ? { type: playing ? 'pause' : 'play' } : { type: 'toggle' });
+  };
+
+  const canScrub = fresh && duration > 0;
+  const pct = canScrub ? Math.min(100, (pos / duration) * 100) : 0;
   return (
     <BottomSheet onClose={onClose} title={ex.name}>
       {!ex.demo && <div className="notice">No demo clip for this exercise yet. Add one in Settings → Exercises.</div>}
@@ -600,30 +681,65 @@ function DemoSheet({ session, ex, onClose }: { session: SessionState; ex: Planne
         )}
       </div>
       <div className="eyebrow">Playback</div>
+      <div className="scrub">
+        <input
+          ref={slider}
+          type="range"
+          aria-label="Position in the clip"
+          min={0}
+          max={canScrub ? duration : 1}
+          step={0.1}
+          value={canScrub ? Math.min(pos, duration) : 0}
+          disabled={!canScrub}
+          style={{ '--pct': `${pct}%` } as CSSProperties}
+          onChange={(e) => onDrag(Number(e.target.value))}
+          onPointerUp={commit}
+          onPointerCancel={commit}
+          onTouchEnd={commit}
+          onKeyUp={commit}
+        />
+        <div className="row spread times">
+          <span>{fmtClock(pos)}</span>
+          <span>{canScrub ? fmtClock(duration) : '–:––'}</span>
+        </div>
+      </div>
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn grow" onClick={() => cmd({ type: 'restart' })} aria-label="Restart">
-          ⟲
+        <button className="btn grow" onClick={restart} aria-label="Restart">
+          <RestartIcon />
         </button>
-        <button className="btn grow" onClick={() => cmd({ type: 'seekBy', seconds: -5 })}>
+        <button className="btn grow" onClick={() => nudge(-5)}>
           −5s
         </button>
-        <button className="btn grow" onClick={() => cmd({ type: 'toggle' })} aria-label="Play or pause">
-          ▶❚❚
+        <button className="btn grow" onClick={playPause} aria-label={playing ? 'Pause' : 'Play'} aria-pressed={playing}>
+          {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
-        <button className="btn grow" onClick={() => cmd({ type: 'seekBy', seconds: 5 })}>
+        <button className="btn grow" onClick={() => nudge(5)}>
           +5s
         </button>
+        <button
+          className={`btn grow ${d.muted ? 'ghost' : ''}`}
+          onClick={() => void app.dispatch({ type: 'demoMuted', muted: !d.muted })}
+          aria-label={d.muted ? 'Turn sound on' : 'Turn sound off'}
+          aria-pressed={!d.muted}
+        >
+          {d.muted ? <SoundOffIcon /> : <SoundOnIcon />}
+        </button>
       </div>
+      {ex.demo && !fresh && (
+        <div className="faint" style={{ fontSize: 13 }}>
+          The TV isn't playing this clip right now{d.enlarged ? '' : ': "Show on TV" puts it up'}.
+        </div>
+      )}
       <div className="eyebrow">Speed</div>
-      <div className="row" style={{ gap: 8 }}>
+      <div className="rates">
         {RATES.map((r) => (
-          <button key={r} className={`btn grow ${Math.abs(d.rate - r) < 0.01 ? 'primary' : ''}`} onClick={() => void app.dispatch({ type: 'demoRate', rate: r })}>
+          <button key={r} className={`btn ${Math.abs(d.rate - r) < 0.01 ? 'primary' : ''}`} onClick={() => void app.dispatch({ type: 'demoRate', rate: r })}>
             {r === 1 ? 'Normal' : `${r}×`}
           </button>
         ))}
       </div>
       <p className="faint" style={{ fontSize: 13, margin: 0 }}>
-        The clip hides on its own when the set starts. Speed stays until you change it.
+        The clip hides on its own when the set starts. Speed and sound stay until you change them.
       </p>
     </BottomSheet>
   );

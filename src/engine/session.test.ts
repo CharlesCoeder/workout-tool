@@ -219,6 +219,20 @@ describe('session state machine', () => {
     expect(s.demo.enlarged).toBe(false);
   });
 
+  it('demo sound is on by default and the mute toggle survives phase changes', () => {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    expect(s.demo.muted).toBe(false);
+    const same = reduce(s, { type: 'demoMuted', muted: false }, T0, opts);
+    expect(same).toBe(s); // no-op write avoided
+    s = reduce(s, { type: 'demoMuted', muted: true }, T0 + 1000, opts);
+    expect(s.demo.muted).toBe(true);
+    s = reduce(s, { type: 'demoCommand', cmd: { type: 'seekTo', seconds: 42 } }, T0 + 2000, opts);
+    expect(s.demo).toMatchObject({ muted: true, seq: 1, cmd: { type: 'seekTo', seconds: 42 } });
+    s = settle(s, T0 + 60_000, opts);
+    expect(s.phase.kind).toBe('working');
+    expect(s.demo.muted).toBe(true);
+  });
+
   it('needsRerack detects plate and mode changes', () => {
     const a = planned({ load: 'pair', loading: { perEnd: [5], dumbbellLb: 14 } });
     const b = planned({ load: 'pair', loading: { perEnd: [5], dumbbellLb: 14 } });

@@ -123,6 +123,7 @@ export type Phase =
 
 export type DemoCommand =
   | { type: 'seekBy'; seconds: number }
+  | { type: 'seekTo'; seconds: number }
   | { type: 'restart' }
   | { type: 'play' }
   | { type: 'pause' }
@@ -133,6 +134,8 @@ export interface DemoState {
   enlarged: boolean;
   /** Playback rate applied to every demo player on the TV. */
   rate: number;
+  /** Sound off. Defaults to on: the TV plays the clip's audio once it has had one click. */
+  muted: boolean;
   /** One-shot command; `seq` increments so the TV applies each once. */
   seq: number;
   cmd: DemoCommand | null;
@@ -166,11 +169,30 @@ export type Action =
   | { type: 'showDemo' }
   | { type: 'hideDemo' }
   | { type: 'demoRate'; rate: number }
+  | { type: 'demoMuted'; muted: boolean }
   | { type: 'demoCommand'; cmd: DemoCommand }
   | { type: 'overrideWeight'; weightLb: number; loading: Loading | null }
   | { type: 'substitute'; exercise: PlannedExercise }
   | { type: 'skipExercise' }
   | { type: 'endSession' };
+
+/**
+ * Where the TV's demo player is, published by the TV a few times a minute (and on every
+ * play/pause/seek) so the phone can draw a scrubber and a correct play/pause icon.
+ * Lives beside `live` (not inside it) so the TV never races the phone's writes.
+ */
+export interface DemoPlayback {
+  sessionId: string;
+  exerciseId: string;
+  /** Seconds into the clip when sampled. */
+  position: number;
+  /** Clip length in seconds; 0 while unknown. */
+  duration: number;
+  playing: boolean;
+  rate: number;
+  /** Backend clock (ms) at sampling time; the phone extrapolates from here. */
+  at: number;
+}
 
 // ---------- History ----------
 

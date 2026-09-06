@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useApp, useSettled } from '../lib/store';
 import { hostPairing } from '../lib/pairing';
-import { audioUnlocked, beep, unlockAudio } from '../lib/beep';
+import { beep, unlockAudio } from '../lib/beep';
+import { onUserActivation, useUserActivated } from '../lib/activation';
+import { playbackPath, shouldPublish } from '../engine/playback';
 import { currentExercise, isTimed, progress, remainingMs } from '../engine/session';
 import { prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
 import { formatLb } from '../engine/plates';
-import type { Inventory, PlannedExercise, Program, SessionRecord, SessionState } from '../engine/types';
-import { Demo, applyDemoCommand } from '../ui/Demo';
+import type { DemoPlayback, Inventory, PlannedExercise, Program, SessionRecord, SessionState } from '../engine/types';
+import { Demo, applyDemoCommand, onDemoProgress } from '../ui/Demo';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
@@ -18,7 +20,8 @@ export function TvPage() {
   const app = useApp();
   const { session, now } = useSettled();
   const [code, setCode] = useState<string | null>(null);
-  const [soundOk, setSoundOk] = useState(audioUnlocked());
+  // Browsers allow sound (beeps, demo audio) only after a click on the page.
+  const activated = useUserActivated();
 
   // Pairing host (Firebase mode only). A new code is issued after each successful pairing.
   useEffect(() => {
@@ -59,18 +62,8 @@ export function TvPage() {
     lastKind.current = kind;
   }, [session, now, app.settings.countdownBeeps]);
 
-  useEffect(() => {
-    const unlock = () => {
-      unlockAudio();
-      setSoundOk(audioUnlocked());
-    };
-    window.addEventListener('pointerdown', unlock);
-    window.addEventListener('keydown', unlock);
-    return () => {
-      window.removeEventListener('pointerdown', unlock);
-      window.removeEventListener('keydown', unlock);
-    };
-  }, []);
+  // The AudioContext for beeps has to be created inside that first gesture.
+  useEffect(() => onUserActivation(unlockAudio), []);
 
   const voice = useVoice(app.settings.voiceEnabled, session, app.dispatch);
 
@@ -92,6 +85,43 @@ export function TvPage() {
     }
   }, [session]);
 
+  // Publish where the primary demo player is, so the phone can draw a scrubber and the
+  // right play/pause icon. Steady playback costs one write per heartbeat; seeks, pauses and
+  // loops are written straight away. A short grace period covers the moment the enlarged
+  // stage closes and the side player takes over as primary.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const lastPub = useRef<DemoPlayback | null>(null);
+  useEffect(() => {
+    const path = playbackPath(app.hid);
+    let clearTimer: ReturnType<typeof setTimeout> | null = null;
+    const off = onDemoProgress((prog) => {
+      const s = sessionRef.current;
+      const ex = s ? currentExercise(s) : undefined;
+      if (!prog || !s || !ex) {
+        if (clearTimer || !lastPub.current) return;
+        clearTimer = setTimeout(() => {
+          clearTimer = null;
+          lastPub.current = null;
+          void app.backend.remove(path);
+        }, 400);
+        return;
+      }
+      if (clearTimer) {
+        clearTimeout(clearTimer);
+        clearTimer = null;
+      }
+      const next: DemoPlayback = { sessionId: s.id, exerciseId: ex.exerciseId, ...prog, at: app.backend.now() };
+      if (!shouldPublish(lastPub.current, next)) return;
+      lastPub.current = next;
+      void app.backend.set(path, next);
+    });
+    return () => {
+      off();
+      if (clearTimer) clearTimeout(clearTimer);
+    };
+  }, [app.backend, app.hid]);
+
   if (!app.loaded) {
     return (
       <div className="tv">
@@ -102,7 +132,8 @@ export function TvPage() {
     );
   }
 
-  const soundHint = app.settings.countdownBeeps && !soundOk ? 'Click once on this screen to enable sound' : '';
+  const wantsSound = app.settings.countdownBeeps || !(session?.demo.muted ?? false);
+  const soundHint = wantsSound && !activated ? 'Click once on this screen to enable sound' : '';
   const voiceHint = app.settings.voiceEnabled ? voice.status : '';
 
   if (!session) return <TvIdle code={code} mode={app.mode} program={app.program} history={app.history} hint={soundHint} voiceHint={voiceHint} />;
@@ -144,7 +175,8 @@ export function TvPage() {
             <div>
               <div className="eyebrow accent">{ex.name}</div>
               <div className="hint" style={{ marginTop: '0.6vmin' }}>
-                {rate !== 1 ? `${rate}× speed · ` : ''}Controls are on your phone
+                {rate !== 1 ? `${rate}× speed · ` : ''}
+                {session.demo.muted ? 'Sound off · ' : ''}Controls are on your phone
               </div>
             </div>
             <div className="stage-timer">
@@ -162,7 +194,7 @@ export function TvPage() {
               )}
             </div>
           </div>
-          <Demo demo={ex.demo} rate={rate} className="stage-video" />
+          <Demo demo={ex.demo} rate={rate} muted={session.demo.muted} primary className="stage-video" />
           <div className="cue" style={{ textAlign: 'center', maxWidth: '60em' }}>
             {ex.cue}
           </div>
@@ -417,7 +449,7 @@ function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory
           <LastTime ex={ex} />
         </div>
         <div className="col side wide">
-          <Demo demo={ex.demo} rate={rate} />
+          <Demo demo={ex.demo} rate={rate} muted={s.demo.muted} primary={!s.demo.enlarged} />
           <div className="muted" style={{ textAlign: 'center' }}>
             {repsTarget(ex)} · {modeLabel(ex.load)}
           </div>
@@ -455,7 +487,7 @@ function TvWorking({ s }: { s: SessionState }) {
           <LastTime ex={ex} />
         </div>
         <div className="col side wide">
-          <Demo demo={ex.demo} rate={rate} />
+          <Demo demo={ex.demo} rate={rate} muted={s.demo.muted} primary={!s.demo.enlarged} />
           <div className="cue" style={{ fontSize: '2.6vmin', textAlign: 'center' }}>
             {ex.cue}
           </div>
@@ -540,7 +572,7 @@ function TvRest({ s, now, inv }: { s: SessionState; now: number; inv: Inventory 
             )}
             {!sameExercise && <Flags ex={ex} />}
           </div>
-          {!sameExercise && <Demo demo={ex.demo} rate={s.demo.rate} />}
+          {!sameExercise && <Demo demo={ex.demo} rate={s.demo.rate} muted={s.demo.muted} primary={!s.demo.enlarged} />}
         </div>
       </div>
       <div className="bottom">

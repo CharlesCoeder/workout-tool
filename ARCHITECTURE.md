@@ -18,6 +18,7 @@ households/{hid}/
   equipment      Inventory      handle/collar weights, plate counts
   settings       Settings       rest defaults, ready countdown, voice toggle...
   live           SessionState | null   the running session (see engine)
+  demoPlayback   DemoPlayback | null   where the TV's demo player is (for the phone's scrubber)
   sessions/{id}  SessionRecord  completed (or abandoned) sessions, for history
 pairings/{CODE}  { tvHid, phoneHid?, createdAt }   short-lived pairing handshake
 ```
