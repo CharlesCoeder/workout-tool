@@ -13,7 +13,8 @@ import {
 import { getStoredHid, randomId, setStoredHid } from './household';
 import { playbackPath } from '../engine/playback';
 import type { BodyWeightEntry } from '../engine/body';
-import { normalizeBodyWeight } from '../backend/normalize';
+import { normalizeBodyWeight, normalizeProfile } from '../backend/normalize';
+import type { Profile } from '../engine/nutrition';
 
 export interface AppStore {
   backend: Backend;
@@ -29,6 +30,8 @@ export interface AppStore {
   history: SessionRecord[];
   /** Body-weight readings, oldest first, one per day. */
   bodyWeight: BodyWeightEntry[];
+  /** Sex, age, height, activity and goal for nutrition targets; null until set up. */
+  profile: Profile | null;
   /** Raw live state (unsettled). Use `useSettled` for rendering. */
   live: SessionState | null;
   now: () => number;
@@ -42,6 +45,7 @@ export interface AppStore {
   clearHistory: () => Promise<void>;
   saveBodyWeight: (date: string, lb: number) => Promise<void>;
   deleteBodyWeight: (date: string) => Promise<void>;
+  saveProfile: (p: Profile) => Promise<void>;
 }
 
 const Ctx = createContext<AppStore | null>(null);
@@ -63,6 +67,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [settingsRaw, setSettingsRaw] = useState<Settings | null>(null);
   const [historyRaw, setHistoryRaw] = useState<Record<string, SessionRecord> | null>(null);
   const [bodyRaw, setBodyRaw] = useState<Record<string, { lb: number; at: number }> | null>(null);
+  const [profileRaw, setProfileRaw] = useState<Partial<Profile> | null>(null);
   const [live, setLive] = useState<SessionState | null>(null);
   const [loadedFlags, setLoadedFlags] = useState(0);
 
@@ -96,6 +101,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setBodyRaw(v);
         mark(32);
       }),
+      backend.subscribe<Partial<Profile>>(`${base}/profile`, (v) => {
+        setProfileRaw(v);
+        mark(64);
+      }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [backend, base]);
@@ -105,7 +114,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const settings = useMemo(() => normalizeSettings(settingsRaw), [settingsRaw]);
   const history = useMemo(() => normalizeRecords(historyRaw), [historyRaw]);
   const bodyWeight = useMemo(() => normalizeBodyWeight(bodyRaw), [bodyRaw]);
-  const loaded = loadedFlags === 63;
+  const profile = useMemo(() => normalizeProfile(profileRaw), [profileRaw]);
+  const loaded = loadedFlags === 127;
 
   const liveRef = useRef(live);
   liveRef.current = live;
@@ -180,6 +190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     settings,
     history,
     bodyWeight,
+    profile,
     live,
     now,
     dispatch,
@@ -192,6 +203,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearHistory: () => backend.remove(`${base}/sessions`),
     saveBodyWeight: (date, lb) => backend.set(`${base}/bodyweight/${date}`, { lb, at: backend.now() }),
     deleteBodyWeight: (date) => backend.remove(`${base}/bodyweight/${date}`),
+    saveProfile: (p) => backend.set(`${base}/profile`, p),
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

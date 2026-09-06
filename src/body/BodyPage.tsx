@@ -3,6 +3,7 @@ import { useApp } from '../lib/store';
 import { TopNav } from '../lib/router';
 import { summarize, todayKey, trend, type TrendPoint } from '../engine/body';
 import { fmtDate } from '../ui/format';
+import { Nutrition } from './Nutrition';
 
 type Range = 28 | 84 | 0;
 
@@ -15,6 +16,7 @@ export function BodyPage() {
       <div className="stack">
         <WeighIn />
         <BodyTrend />
+        <Nutrition />
         <Entries entries={app.bodyWeight} />
       </div>
     </div>

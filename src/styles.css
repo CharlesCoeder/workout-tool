@@ -1170,3 +1170,11 @@ table.plain th {
   stroke: var(--accent);
   stroke-width: 3;
 }
+
+.notice.accent {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+details summary::-webkit-details-marker {
+  color: var(--fg-3);
+}

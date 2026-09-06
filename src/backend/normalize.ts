@@ -2,6 +2,7 @@ import type { Exercise, Inventory, PlannedExercise, Program, SessionRecord, Sess
 import { DEFAULT_INVENTORY, DEFAULT_PROGRAM, DEFAULT_SETTINGS } from '../engine/defaults';
 import { DEFAULT_DEMO } from '../engine/session';
 import type { BodyWeightEntry } from '../engine/body';
+import { ACTIVITY, DEFAULT_PROFILE, type Profile } from '../engine/nutrition';
 
 // RTDB drops empty arrays and null keys; these restore the shapes the engine expects.
 
@@ -92,6 +93,19 @@ export function normalizeBodyWeight(v: Record<string, { lb: number; at: number }
     .filter(([date, e]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && e && typeof e.lb === 'number' && e.lb > 0)
     .map(([date, e]) => ({ date, lb: e.lb, at: e.at ?? 0 }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** A profile is either complete or absent; a half-saved one falls back to defaults per field. */
+export function normalizeProfile(p: Partial<Profile> | null): Profile | null {
+  if (!p || typeof p !== 'object') return null;
+  return {
+    sex: p.sex === 'female' ? 'female' : 'male',
+    birthYear: typeof p.birthYear === 'number' ? p.birthYear : DEFAULT_PROFILE.birthYear,
+    heightIn: typeof p.heightIn === 'number' ? p.heightIn : DEFAULT_PROFILE.heightIn,
+    activity: p.activity && p.activity in ACTIVITY ? p.activity : DEFAULT_PROFILE.activity,
+    goal: p.goal === 'lose' || p.goal === 'gain' ? p.goal : 'maintain',
+    rateLbPerWeek: typeof p.rateLbPerWeek === 'number' && p.rateLbPerWeek > 0 ? p.rateLbPerWeek : DEFAULT_PROFILE.rateLbPerWeek,
+  };
 }
 
 export function normalizeRecords(v: Record<string, SessionRecord> | null): SessionRecord[] {
