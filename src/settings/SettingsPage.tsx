@@ -588,7 +588,7 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
           <span>Voice control on the TV page (Chrome, needs a microphone)</span>
         </label>
         <p className="muted" style={{ fontSize: 13 }}>
-          Voice understands: "done", a number ("ten"), "skip", "go", "pause", "resume", "show me again". The remote always works regardless.
+          Voice understands: "done", a number ("ten"), "skip", "go", "pause", "resume", "undo", "show me again". The remote always works regardless.
         </p>
       </div>
     </div>
