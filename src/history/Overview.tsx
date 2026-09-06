@@ -4,6 +4,7 @@ import { MUSCLES, addDays, consistency, daysBetween, plannedSetsPerMuscle, setsP
 import { allPrs } from '../engine/records';
 import { formatLb } from '../engine/plates';
 import { fmtDate } from '../ui/format';
+import { WeekDots } from '../ui/WeekDots';
 
 const WEEKS = 12;
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -34,7 +35,7 @@ export function Overview() {
             {c.thisWeek} of {c.target} sessions
           </span>
         </div>
-        <WeekDots week={thisWeek} now={now} />
+        <WeekDots days={thisWeek.days} today={daysBetween(thisWeek.start, now)} />
         <div className="muted" style={{ fontSize: 14 }}>
           {c.lastSessionAt !== null && c.daysSince !== null ? `Last session ${ago(c.daysSince)}` : 'No sessions yet'}
           {c.recentPerWeek > 0 ? ` · averaging ${c.recentPerWeek} a week over the last four weeks` : ''}
@@ -82,24 +83,6 @@ export function Overview() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function WeekDots({ week, now }: { week: WeekStat; now: number }) {
-  const today = daysBetween(week.start, now);
-  return (
-    <div className="weekdots">
-      {DAY_LETTERS.map((l, i) => {
-        const done = week.days.includes(i);
-        const cls = done ? 'done' : i > today ? 'future' : '';
-        return (
-          <div key={i} className={`wd ${cls} ${i === today ? 'today' : ''}`}>
-            <i />
-            <span>{l}</span>
-          </div>
-        );
-      })}
     </div>
   );
 }

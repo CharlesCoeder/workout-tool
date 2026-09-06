@@ -54,6 +54,20 @@ export function isDone(s: SessionState): boolean {
   return s.phase.kind === 'summary';
 }
 
+/** When something last happened in the session: a set logged, or its start. */
+export function lastActivityAt(s: SessionState): number {
+  let t = s.endedAt ?? s.startedAt;
+  for (const e of s.exercises) for (const r of e.results) if (r.at > t) t = r.at;
+  return t;
+}
+
+/** A session nobody has touched for this long was abandoned, not paused. */
+export const STALE_SESSION_MS = 3 * 60 * 60 * 1000;
+
+export function isStale(s: SessionState, now: number): boolean {
+  return s.phase.kind !== 'summary' && now - lastActivityAt(s) > STALE_SESSION_MS;
+}
+
 /** Rack loading needed for an exercise (per-end plates), for change detection. */
 function perEndOf(ex: PlannedExercise | undefined): number[] | null {
   if (!ex || ex.load === 'bodyweight' || !ex.loading) return null;

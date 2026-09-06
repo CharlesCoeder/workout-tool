@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSession, needsRerack, progress, reduce, remainingMs, settle } from './session';
+import { createSession, isStale, lastActivityAt, needsRerack, progress, reduce, remainingMs, settle } from './session';
 import { planDay, planSession, suggestNextDay, toRecord } from './plan';
 import { DEFAULT_INVENTORY as inv, DEFAULT_PROGRAM } from './defaults';
 import type { PlannedExercise, SessionState } from './types';
@@ -362,5 +362,22 @@ describe('corrections: undo, edit, notes', () => {
     s = reduce(s, { type: 'note', text: '' }, T0, opts);
     expect(s.note).toBeUndefined();
     expect(reduce(s, { type: 'note', text: '' }, T0, opts)).toBe(s);
+  });
+});
+
+describe('stale sessions', () => {
+  it('goes stale three hours after the last logged set', () => {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    expect(lastActivityAt(s)).toBe(T0);
+    expect(isStale(s, T0 + 2 * 3600_000)).toBe(false);
+    expect(isStale(s, T0 + 4 * 3600_000)).toBe(true);
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    s = reduce(s, { type: 'logReps', reps: 8 }, T0 + 3600_000, opts);
+    expect(lastActivityAt(s)).toBe(T0 + 3600_000);
+    expect(isStale(s, T0 + 4 * 3600_000)).toBe(false);
+    expect(isStale(s, T0 + 5 * 3600_000)).toBe(true);
+    // a finished session is never stale; it is just waiting for "Finish"
+    s = reduce(s, { type: 'endSession' }, T0 + 3700_000, opts);
+    expect(isStale(s, T0 + 50 * 3600_000)).toBe(false);
   });
 });

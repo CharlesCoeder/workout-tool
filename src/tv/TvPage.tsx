@@ -4,7 +4,7 @@ import { hostPairing } from '../lib/pairing';
 import { beep, unlockAudio } from '../lib/beep';
 import { onUserActivation, useUserActivated } from '../lib/activation';
 import { playbackPath, shouldPublish } from '../engine/playback';
-import { currentExercise, isTimed, progress, remainingMs } from '../engine/session';
+import { currentExercise, isStale, isTimed, progress, remainingMs } from '../engine/session';
 import { STALL_SESSIONS, prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
 import { formatLb } from '../engine/plates';
@@ -135,6 +135,7 @@ export function TvPage() {
 
   const wantsSound = app.settings.countdownBeeps || !(session?.demo.muted ?? false);
   const soundHint = wantsSound && !activated ? 'Click once on this screen to enable sound' : '';
+  const staleHint = session && isStale(session, now) ? 'This session has been idle for hours: the phone offers to discard it' : '';
   const voiceHint = app.settings.voiceEnabled ? voice.status : '';
 
   if (!session) return <TvIdle code={code} mode={app.mode} program={app.program} history={app.history} hint={soundHint} voiceHint={voiceHint} />;
@@ -207,9 +208,9 @@ export function TvPage() {
           <span className="hint">resume from your phone</span>
         </div>
       )}
-      {(soundHint || voiceHint) && (
+      {(soundHint || voiceHint || staleHint) && (
         <div style={{ position: 'fixed', right: '5vmin', bottom: '1.5vmin' }} className="hint">
-          {[voiceHint, soundHint].filter(Boolean).join(' · ')}
+          {[staleHint, voiceHint, soundHint].filter(Boolean).join(' · ')}
         </div>
       )}
     </div>

@@ -3,7 +3,9 @@ import { useApp, useSettled } from '../lib/store';
 import { useWakeLock } from '../lib/useWakeLock';
 import { joinPairing } from '../lib/pairing';
 import { Link } from '../lib/router';
-import { currentExercise, lastLoggedSet, progress, remainingMs } from '../engine/session';
+import { currentExercise, isStale, lastActivityAt, lastLoggedSet, progress, remainingMs } from '../engine/session';
+import { consistency, daysBetween, estimateSessionMs, startOfWeek, typicalDurationMs, weeklyStats } from '../engine/stats';
+import { WeekDots } from '../ui/WeekDots';
 import { planDay, planExercise, suggestNextDay } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps } from '../engine/records';
@@ -25,7 +27,10 @@ export function RemotePage() {
   const { session, now } = useSettled();
   const [sheet, setSheet] = useState<Sheet>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const active = !!session && session.phase.kind !== 'summary';
+  // A session left open for hours is offered for discarding rather than silently resumed.
+  const [resumedStale, setResumedStale] = useState<string | null>(null);
+  const stale = !!session && isStale(session, now) && resumedStale !== session.id;
+  const active = !!session && session.phase.kind !== 'summary' && !stale;
   useWakeLock(active);
 
   useEffect(() => {
@@ -126,6 +131,31 @@ export function RemotePage() {
     );
   }
 
+  if (stale) {
+    const at = new Date(lastActivityAt(session));
+    const logged = session.exercises.filter((e) => e.results.length > 0).length;
+    return (
+      <div className="remote">
+        <div className="card stack">
+          <strong>A session is still open</strong>
+          <span className="muted">
+            {session.dayName}, last touched {at.toLocaleDateString(undefined, { weekday: 'short' })} at {at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}.{' '}
+            {logged ? `${logged} exercise${logged === 1 ? '' : 's'} logged so far; those stay in your history either way.` : 'Nothing was logged.'}
+          </span>
+          <div className="row">
+            <button className="btn primary grow" onClick={() => setResumedStale(session.id)}>
+              Pick it back up
+            </button>
+            <button className="btn ghost grow" onClick={() => void app.clearLive()}>
+              Discard
+            </button>
+          </div>
+        </div>
+        {sheets}
+      </div>
+    );
+  }
+
   const p = session.phase;
   let body: ReactNode;
   switch (p.kind) {
@@ -213,6 +243,9 @@ function DayPicker({ onPair }: { onPair: () => void }) {
   const app = useApp();
   const suggested = suggestNextDay(app.program, app.history);
   const [busy, setBusy] = useState(false);
+  const now = useMemo(() => app.now(), [app.now]);
+  const week = useMemo(() => weeklyStats(app.history, app.program, 1, now)[0], [app.history, app.program, now]);
+  const c = useMemo(() => consistency(app.history, app.settings.targetSessionsPerWeek, now), [app.history, app.settings.targetSessionsPerWeek, now]);
   const plans = useMemo(
     () => Object.fromEntries(app.program.days.map((d) => [d.id, planDay(app.program, d, app.history, app.inventory, app.settings.progressionRule)])),
     [app.program, app.history, app.inventory, app.settings.progressionRule],
@@ -224,6 +257,12 @@ function DayPicker({ onPair }: { onPair: () => void }) {
     } finally {
       setBusy(false);
     }
+  };
+  const lengthOf = (d: Day) => {
+    const typical = typicalDurationMs(app.history, d.id);
+    if (typical) return `usually ${Math.round(typical / 60_000)} min`;
+    const est = estimateSessionMs(plans[d.id], app.program.warmup, { readySec: app.settings.readySec, rerackBonusSec: app.settings.rerackBonusSec });
+    return `about ${Math.round(est / 60_000)} min`;
   };
   return (
     <>
@@ -244,6 +283,21 @@ function DayPicker({ onPair }: { onPair: () => void }) {
         </div>
       )}
       {app.mode === 'local' && <div className="notice">Local mode: open /tv in another tab of this browser to see the TV screen.</div>}
+      {app.history.length > 0 && (
+        <div className="card stack" style={{ gap: 10 }}>
+          <div className="row spread">
+            <span className="eyebrow">This week</span>
+            <span className={`${c.thisWeek >= c.target ? 'good' : 'muted'}`} style={{ fontSize: 14 }}>
+              {c.thisWeek} of {c.target} sessions
+            </span>
+          </div>
+          <WeekDots days={week.days} today={daysBetween(startOfWeek(now), now)} />
+          <span className="faint" style={{ fontSize: 13 }}>
+            {c.daysSince === null ? '' : c.daysSince === 0 ? 'Trained today.' : c.daysSince === 1 ? 'Last session yesterday.' : `Last session ${c.daysSince} days ago.`}
+            {c.recentPerWeek > 0 ? ` Averaging ${c.recentPerWeek} a week lately.` : ''}
+          </span>
+        </div>
+      )}
       <div className="days">
         {app.program.days.map((d) => {
           const plan = plans[d.id];
@@ -254,6 +308,9 @@ function DayPicker({ onPair }: { onPair: () => void }) {
                 <span className="title">{d.name}</span>
                 {isSug && <span className="pill accent">Up next</span>}
               </div>
+              <span className="faint" style={{ fontSize: 13 }}>
+                {plan.length} exercise{plan.length === 1 ? '' : 's'} · {lengthOf(d)}
+              </span>
               <div className="list">
                 {plan.map((e) => (
                   <div key={e.exerciseId}>
