@@ -3,7 +3,7 @@ import { useApp, useSettled } from '../lib/store';
 import { useWakeLock } from '../lib/useWakeLock';
 import { joinPairing } from '../lib/pairing';
 import { Link } from '../lib/router';
-import { currentExercise, progress, remainingMs } from '../engine/session';
+import { currentExercise, lastLoggedSet, progress, remainingMs } from '../engine/session';
 import { planDay, planExercise, suggestNextDay } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
 import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
@@ -13,8 +13,10 @@ import { PauseIcon, PlayIcon, RestartIcon, SoundOffIcon, SoundOnIcon } from '../
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
+import { BottomSheet } from './Sheet';
+import { LogSheet } from './LogSheet';
 
-type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo';
+type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo' | 'log';
 
 export function RemotePage() {
   const app = useApp();
@@ -78,6 +80,10 @@ export function RemotePage() {
                 Skip {ex.name}
               </button>
             )}
+            <button className="item" onClick={() => setSheet('log')}>
+              Logged sets &amp; notes
+              {lastLoggedSet(session) && <span className="muted" style={{ fontSize: 13 }}>undo · edit</span>}
+            </button>
             <button className="item danger" onClick={() => setSheet('end')}>
               End session early
             </button>
@@ -92,6 +98,7 @@ export function RemotePage() {
       {sheet === 'weight' && session && ex && <WeightSheet ex={ex} onClose={closeSheet} onDone={say} />}
       {sheet === 'demo' && session && ex && <DemoSheet session={session} ex={ex} now={now} onClose={closeSheet} />}
       {sheet === 'swap' && session && ex && <SwapSheet session={session} ex={ex} onClose={closeSheet} onDone={say} />}
+      {sheet === 'log' && session && <LogSheet session={session} onClose={closeSheet} onDone={say} />}
       {sheet === 'end' && (
         <BottomSheet onClose={closeSheet} title="End the session?">
           <p className="muted">What you've logged so far is saved and counts for progression.</p>
@@ -136,7 +143,7 @@ export function RemotePage() {
       body = <RestControls s={session} now={now} onWeight={() => setSheet('weight')} onDemo={() => openDemo()} />;
       break;
     case 'summary':
-      body = <SummaryControls s={session} />;
+      body = <SummaryControls s={session} onEdit={() => setSheet('log')} />;
       break;
   }
 
@@ -175,22 +182,6 @@ function Header({ s }: { s: SessionState }) {
       <span className="muted" style={{ fontSize: 14 }}>
         {pr.setsDone}/{pr.setsTotal} sets{s.paused ? ' · paused' : ''}
       </span>
-    </div>
-  );
-}
-
-function BottomSheet({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
-  return (
-    <div className="sheet" onClick={onClose}>
-      <div className="panel" onClick={(e) => e.stopPropagation()}>
-        <div className="row spread">
-          <strong style={{ fontSize: 18 }}>{title}</strong>
-          <button className="btn small ghost" onClick={onClose}>
-            Close
-          </button>
-        </div>
-        {children}
-      </div>
     </div>
   );
 }
@@ -413,12 +404,23 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
   const ex = currentExercise(s)!;
   const plan = rackPlanFor(s, s.cursor.ex, app.inventory);
   const sameExercise = s.cursor.set > 0;
+  const last = lastLoggedSet(s);
   return (
     <>
       <div className="hero">
         <div className="eyebrow accent">Rest</div>
       </div>
       <div className="count">{fmtCountdown(remainingMs(s, now))}</div>
+      {last && (
+        <div className="row" style={{ justifyContent: 'center', gap: 10 }}>
+          <span className="muted" style={{ fontSize: 14 }}>
+            Logged {last.result.reps} reps for {s.exercises[last.ex].name}, set {last.set + 1}
+          </span>
+          <button className="btn small ghost" onClick={() => void app.dispatch({ type: 'undoSet' })}>
+            Undo
+          </button>
+        </div>
+      )}
       <div className="card stack" style={{ gap: 8 }}>
         <div className="eyebrow">{sameExercise ? 'Next' : 'Next up'}</div>
         <div style={{ fontSize: 22, fontWeight: 700 }}>{ex.name}</div>
@@ -461,7 +463,7 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
   );
 }
 
-function SummaryControls({ s }: { s: SessionState }) {
+function SummaryControls({ s, onEdit }: { s: SessionState; onEdit: () => void }) {
   const app = useApp();
   const done = s.exercises.filter((e) => e.results.length > 0);
   return (
@@ -472,16 +474,23 @@ function SummaryControls({ s }: { s: SessionState }) {
       </div>
       <div className="card stack" style={{ gap: 8 }}>
         {done.map((e) => (
-          <div key={e.exerciseId} className="row spread">
-            <span>{e.name}</span>
-            <span className="muted">
-              {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
-              {e.results.map((r) => r.reps).join(', ')}
-            </span>
+          <div key={e.exerciseId} className="stack" style={{ gap: 2 }}>
+            <div className="row spread">
+              <span>{e.name}</span>
+              <span className="muted">
+                {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
+                {e.results.map((r) => r.reps).join(', ')}
+              </span>
+            </div>
+            {e.note && <div className="faint" style={{ fontSize: 13 }}>{e.note}</div>}
           </div>
         ))}
         {!done.length && <span className="muted">Nothing logged.</span>}
+        {s.note && <div className="muted" style={{ fontSize: 14, borderTop: '1px solid var(--line)', paddingTop: 8 }}>{s.note}</div>}
       </div>
+      <button className="btn ghost" onClick={onEdit}>
+        Fix a number or add a note
+      </button>
       <button className="btn primary big" onClick={() => void app.clearLive()}>
         Finish
       </button>

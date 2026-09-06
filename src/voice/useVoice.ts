@@ -49,6 +49,7 @@ export function commandFor(text: string, session: SessionState | null): Action |
   const kind = session.phase.kind;
   if (/\b(pause|hold on|wait)\b/.test(t)) return session.paused ? null : { type: 'pause' };
   if (/\b(resume|continue|unpause)\b/.test(t)) return session.paused ? { type: 'resume' } : null;
+  if (/\b(undo|take that back|scratch that)\b/.test(t)) return { type: 'undoSet' };
   if (session.paused) return null;
   if (/\b(hide|close)\b/.test(t) && session.demo.enlarged) return { type: 'hideDemo' };
   if (/\b(slow|slower|slow mo|slow motion)\b/.test(t)) return { type: 'demoRate', rate: 0.5 };

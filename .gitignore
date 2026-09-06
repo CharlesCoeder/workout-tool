@@ -4,3 +4,6 @@ dist
 .env.local
 .firebase
 *.log
+.playwright-mcp
+*.png
+!public/*.png

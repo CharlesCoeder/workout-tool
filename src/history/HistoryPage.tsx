@@ -90,13 +90,17 @@ function SessionCard({ s, onDelete }: { s: SessionRecord; onDelete: () => void }
         <tbody>
           {s.exercises.map((e) => (
             <tr key={e.exerciseId}>
-              <td>{e.name}</td>
+              <td>
+                {e.name}
+                {e.note && <div className="faint" style={{ fontSize: 13 }}>{e.note}</div>}
+              </td>
               <td className="muted">{weightLabel(e.weightLb, e.load)}</td>
               <td className="muted">{e.reps.join(', ')}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {s.note && <div className="muted" style={{ fontSize: 14 }}>{s.note}</div>}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         {confirm ? (
           <>
