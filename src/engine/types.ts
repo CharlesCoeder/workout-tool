@@ -47,6 +47,8 @@ export interface Exercise {
   startWeightLb: number;
   perSide?: boolean;
   notes?: string;
+  /** Muscle groups worked; the first is the main one (counts a full set, the rest count half). */
+  muscles?: string[];
 }
 
 export interface DayEntry {
@@ -83,6 +85,8 @@ export interface Settings {
   voiceEnabled: boolean;
   countdownBeeps: boolean;
   progressionRule: ProgressionRule;
+  /** Sessions per week you are aiming for; drives the "this week" card. */
+  targetSessionsPerWeek: number;
 }
 
 // ---------- Session ----------

@@ -18,6 +18,34 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceEnabled: false,
   countdownBeeps: true,
   progressionRule: 'firstSet',
+  targetSessionsPerWeek: 3,
+};
+
+// Main muscle first: it gets full credit for a set in the weekly balance chart, the rest get half.
+const MUSCLES: Record<string, string[]> = {
+  'squat': ['quads', 'glutes'],
+  'floor-press': ['chest', 'triceps'],
+  'one-arm-row': ['back', 'biceps'],
+  'curl': ['biceps'],
+  'overhead-extension': ['triceps'],
+  'situp': ['core'],
+  'step-up': ['quads', 'glutes'],
+  'sldl': ['hamstrings', 'glutes'],
+  'seated-press': ['shoulders', 'triceps'],
+  'bent-over-row': ['back', 'biceps'],
+  'lateral-raise': ['shoulders'],
+  'rear-delt-fly': ['shoulders', 'back'],
+  'calf-raise': ['calves'],
+  'shrug': ['traps'],
+  'lunge': ['quads', 'glutes'],
+  'pullover': ['chest', 'back'],
+  'hammer-curl': ['biceps', 'forearms'],
+  'lying-extension': ['triceps'],
+  'leg-raise': ['core'],
+  'goblet-squat': ['quads', 'glutes'],
+  'pushup': ['chest', 'triceps'],
+  'chinup': ['back', 'biceps'],
+  'pullup': ['back', 'biceps'],
 };
 
 // Public YouTube demos (muted, looping embeds). Replace with your own clips in Settings → Exercises.
@@ -64,6 +92,7 @@ const ex = (
   demo: DEMOS[id] ? { type: 'youtube', id: DEMOS[id] } : null,
   substitutes: [],
   startWeightLb,
+  muscles: MUSCLES[id] ?? [],
   ...extra,
 });
 

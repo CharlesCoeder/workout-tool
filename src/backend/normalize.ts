@@ -21,6 +21,8 @@ export function normalizeExercise(e: Partial<Exercise> & { id: string }): Exerci
     startWeightLb: e.startWeightLb ?? 0,
     perSide: !!e.perSide,
     notes: e.notes,
+    // Programs saved before muscle tags existed borrow the default library's tags by id.
+    muscles: arr<string>(e.muscles).length ? arr<string>(e.muscles) : (DEFAULT_PROGRAM.exercises[e.id]?.muscles ?? []),
   };
 }
 

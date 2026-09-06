@@ -6,6 +6,7 @@ import { achievableWeights, formatLb } from '../engine/plates';
 import type { Day, DayEntry, Exercise, Inventory, Program, Settings, WarmupStep } from '../engine/types';
 import { youtubeIdFrom } from '../ui/Demo';
 import { getStoredHid, setStoredHid } from '../lib/household';
+import { MUSCLES } from '../engine/stats';
 
 type Tab = 'program' | 'exercises' | 'equipment' | 'timing' | 'data';
 
@@ -379,6 +380,25 @@ function ExerciseForm({ ex, all, onChange, onDelete }: { ex: Exercise; all: Exer
         </div>
       )}
       <div className="field">
+        <label>Muscles worked (tap in order: the first is the main one and counts a full set in the weekly balance, the rest count half)</label>
+        <div className="row wrap" style={{ gap: 6 }}>
+          {MUSCLES.map((m) => {
+            const list = draft.muscles ?? [];
+            const idx = list.indexOf(m);
+            return (
+              <button
+                key={m}
+                className={`pill ${idx === 0 ? 'accent' : idx > 0 ? 'good' : ''}`}
+                onClick={() => set({ muscles: idx >= 0 ? list.filter((x) => x !== m) : [...list, m] })}
+              >
+                {m}
+                {idx === 0 ? ' · main' : ''}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="field">
         <label>Substitutes (offered first when you swap)</label>
         <div className="row wrap" style={{ gap: 6 }}>
           {all
@@ -532,6 +552,10 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
             <option value="firstSet">First set reaches the top of the rep range (the program's rule)</option>
             <option value="allSets">Every set reaches the top of the rep range (stricter, slower)</option>
           </select>
+        </div>
+        <div className="field">
+          <label>Sessions per week you're aiming for</label>
+          <input type="number" min={1} max={7} value={s.targetSessionsPerWeek} onChange={(e) => save({ targetSessionsPerWeek: Math.max(1, Math.min(7, Number(e.target.value) || 1)) })} />
         </div>
         <p className="muted" style={{ fontSize: 13 }}>
           Either way the weight only ever goes up on its own. If a lift goes three sessions without beating the session before (first-set reps or total reps), the TV says so and suggests a step down for a session; it never changes the weight for you.
