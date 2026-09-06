@@ -7,10 +7,10 @@ import { Link } from '../lib/router';
 import { currentExercise, isStale, lastActivityAt, lastLoggedSet, progress, remainingMs } from '../engine/session';
 import { consistency, daysBetween, estimateSessionMs, startOfWeek, typicalDurationMs, weeklyStats } from '../engine/stats';
 import { WeekDots } from '../ui/WeekDots';
-import { planDay, planExercise, suggestNextDay } from '../engine/plan';
+import { planDay, planExercise, suggestNextDay, toRecord } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps } from '../engine/records';
-import { STALL_SESSIONS } from '../engine/progression';
+import { STALL_SESSIONS, performances } from '../engine/progression';
 import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
 import { fmtClock, isFresh, playbackPath, positionAt } from '../engine/playback';
 import { fmtCountdown, fmtDuration, perEndLabel, repsTarget, weightLabel } from '../ui/format';
@@ -573,6 +573,7 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
 function SummaryControls({ s, onEdit }: { s: SessionState; onEdit: () => void }) {
   const app = useApp();
   const done = s.exercises.map((e, i) => ({ e, i })).filter(({ e }) => e.results.length > 0);
+  const nextDay = suggestNextDay(app.program, [...app.history.filter((h) => h.id !== s.id), toRecord(s)]);
   const prs = sessionPrs(app.history, s);
   const volume = sessionVolume(s);
   const pr = progress(s);
@@ -581,6 +582,7 @@ function SummaryControls({ s, onEdit }: { s: SessionState; onEdit: () => void })
       <div className="hero">
         <div className="eyebrow accent">Session complete</div>
         <div className="name">Nice work.</div>
+        {nextDay && <div className="muted">Next time: {nextDay.name}.</div>}
       </div>
       <div className="stats">
         <div>
@@ -652,6 +654,7 @@ function WeightSheet({ ex, onClose, onDone }: { ex: PlannedExercise; onClose: ()
   const app = useApp();
   const mode = ex.load;
   const weights = achievableWeights(app.inventory, mode);
+  const recent = performances(app.history, ex.exerciseId).slice(0, 3);
   const pick = async (lb: number) => {
     const loading = loadingFor(app.inventory, mode, lb, ex.loading?.perEnd);
     await app.dispatch({ type: 'overrideWeight', weightLb: lb, loading });
@@ -673,6 +676,11 @@ function WeightSheet({ ex, onClose, onDone }: { ex: PlannedExercise; onClose: ()
       {ex.loading && (
         <div className="muted" style={{ fontSize: 14 }}>
           Now: {perEndLabel(ex.loading.perEnd)}
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div className="faint" style={{ fontSize: 13 }}>
+          Recent: {recent.map((p) => `${formatLb(p.entry.weightLb)} lb × ${p.entry.reps.join('/')}`).join(' · ')}
         </div>
       )}
     </BottomSheet>

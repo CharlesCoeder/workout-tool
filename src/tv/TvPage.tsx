@@ -9,7 +9,7 @@ import { playbackPath, shouldPublish } from '../engine/playback';
 import { currentExercise, isStale, isTimed, progress, remainingMs } from '../engine/session';
 import { STALL_SESSIONS, prescribe } from '../engine/progression';
 import { suggestNextDay, toRecord } from '../engine/plan';
-import { estimateSessionMs, typicalDurationMs } from '../engine/stats';
+import { consistency, estimateSessionMs, typicalDurationMs } from '../engine/stats';
 import { formatLb } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps, type RepTarget } from '../engine/records';
 import type { DemoPlayback, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from '../engine/types';
@@ -416,12 +416,19 @@ function TargetLine({ target, size = 'big' }: { target: RepTarget | null; size?:
 }
 
 function LastTime({ ex }: { ex: PlannedExercise }) {
-  if (!ex.lastTime) return <div className="lasttime faint">First time on this one. Pick a weight you can do for {ex.repMax} clean reps.</div>;
+  if (!ex.lastTime)
+    return (
+      <div className="lasttime faint">
+        {ex.load === 'bodyweight' ? `First time on this one. Stop a rep or two short of failure.` : `First time on this one. Pick a weight you can do for ${ex.repMax} clean reps.`}
+      </div>
+    );
+  const bwTop = ex.load === 'bodyweight' && ex.lastTime.reps[0] >= ex.repMax;
   return (
     <div className="lasttime">
       Last time: {ex.load === 'bodyweight' ? '' : `${formatLb(ex.lastTime.weightLb)} lb × `}
       {ex.lastTime.reps.join(', ')}
       {ex.maxedOut && ex.load !== 'bodyweight' ? ' · push toward the top of the range' : ''}
+      {bwTop ? ' · at the top of the range: slow the lowering, pause at the hard point, or hold a plate' : ''}
     </div>
   );
 }
@@ -445,7 +452,7 @@ function TvIdle({
   history: SessionRecord[];
   inv: Inventory;
   rule: ProgressionRule;
-  settings: { readySec: number; rerackBonusSec: number };
+  settings: { readySec: number; rerackBonusSec: number; targetSessionsPerWeek: number };
   hint: string;
   voiceHint: string;
 }) {
@@ -454,11 +461,15 @@ function TvIdle({
   const host = window.location.host;
   const plan = useMemo(() => (next ? planDay(program, next, history, inv, rule) : []), [program, next, history, inv, rule]);
   const length = next ? (typicalDurationMs(history, next.id) ?? estimateSessionMs(plan, program.warmup, settings)) : 0;
+  const week = consistency(history, settings.targetSessionsPerWeek, Date.now());
   return (
     <div className="tv">
       <div className="top">
         <div className="eyebrow">Dumbbell Coach</div>
-        <div className="muted">{last ? `Last session: ${last.dayName}, ${new Date(last.startedAt).toLocaleDateString()}` : ''}</div>
+        <div className="muted">
+          {last ? `Last session: ${last.dayName}, ${new Date(last.startedAt).toLocaleDateString()}` : ''}
+          {history.length ? ` · this week ${week.thisWeek} of ${week.target}` : ''}
+        </div>
       </div>
       <div className="main center">
         <div className="col center fade-in">
@@ -745,6 +756,7 @@ function TvSummary({ s, program, history, inv, rule }: { s: SessionState; progra
   const durationMs = (s.endedAt ?? s.startedAt) - s.startedAt;
   const volume = sessionVolume(s);
   const pr = progress(s);
+  const nextDay = suggestNextDay(program, hist);
   return (
     <>
       <div className="top">
@@ -800,7 +812,13 @@ function TvSummary({ s, program, history, inv, rule }: { s: SessionState; progra
                     ))}
                   </td>
                   <td>
-                    {!next || e.load === 'bodyweight' ? (
+                    {e.load === 'bodyweight' ? (
+                      e.results[0].reps >= e.repMax ? (
+                        <span className="good">top of the range: make it harder</span>
+                      ) : (
+                        <span className="faint">reps only</span>
+                      )
+                    ) : !next ? (
                       <span className="faint">reps only</span>
                     ) : next.progressed ? (
                       <span className="good">▲ {formatLb(next.weightLb)} lb</span>
@@ -821,6 +839,7 @@ function TvSummary({ s, program, history, inv, rule }: { s: SessionState; progra
       </div>
       <div className="bottom">
         <div className="hint">Tap "Finish" on your phone to clear the screen.</div>
+        {nextDay && <div className="muted">Next time: {nextDay.name}</div>}
       </div>
     </>
   );
