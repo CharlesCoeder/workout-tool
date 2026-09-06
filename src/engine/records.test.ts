@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { e1rm, liftRecords, prForSet, priorBest, recordVolume, sessionPrs, sessionVolume, setVolume, targetReps } from './records';
+import { allPrs, e1rm, liftRecords, prForSet, priorBest, recordVolume, sessionPrs, sessionVolume, setVolume, targetReps } from './records';
 import { createSession, reduce } from './session';
 import { DEFAULT_PROGRAM } from './defaults';
 import type { PlannedExercise, SessionRecord, SessionState } from './types';
@@ -142,6 +142,21 @@ describe('personal records', () => {
   it('zero-rep sets are never records', () => {
     const s = logAll(live([planned({ weightLb: 19 })]), [[0]]);
     expect(prForSet(history, s, 0, 0)).toBeNull();
+  });
+
+  it('replays history to list every PR in order', () => {
+    const hist = [
+      rec('h1', 1, [{ exerciseId: 'squat', weightLb: 9, reps: [10, 9, 8] }]),
+      rec('h2', 2, [{ exerciseId: 'squat', weightLb: 9, reps: [12, 9, 8] }]), // reps PR on set 1
+      rec('h3', 3, [{ exerciseId: 'squat', weightLb: 14, reps: [8, 8, 9] }]), // weight PR on set 1, reps-at-14 PR on set 3
+    ];
+    const prs = allPrs(hist);
+    expect(prs.map((p) => [p.sessionId, p.set, p.pr.kind])).toEqual([
+      ['h2', 0, 'reps'],
+      ['h3', 0, 'weight'],
+      ['h3', 2, 'reps'],
+    ]);
+    expect(allPrs([hist[0]])).toEqual([]);
   });
 
   it('all-time lift records', () => {

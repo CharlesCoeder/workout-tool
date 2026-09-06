@@ -138,6 +138,40 @@ export function sessionPrs(history: SessionRecord[], s: SessionState): { ex: num
   return out;
 }
 
+/** Every PR in history, in the order it was set: replay the sessions and compare each set with what came before. */
+export interface HistoryPr {
+  sessionId: string;
+  at: number;
+  exerciseId: string;
+  name: string;
+  load: LoadMode;
+  weightLb: number;
+  reps: number;
+  set: number;
+  pr: Pr;
+}
+
+export function allPrs(history: SessionRecord[]): HistoryPr[] {
+  const best = new Map<string, PriorBest>();
+  const out: HistoryPr[] = [];
+  for (const s of [...history].sort((a, b) => a.startedAt - b.startedAt)) {
+    for (const e of s.exercises) {
+      const b = best.get(e.exerciseId) ?? emptyBest();
+      best.set(e.exerciseId, b);
+      const eligible = b.sessions >= 1;
+      e.reps.forEach((reps, set) => {
+        if (eligible) {
+          const pr = prAgainst(b, e.load, e.weightLb, reps);
+          if (pr) out.push({ sessionId: s.id, at: s.startedAt, exerciseId: e.exerciseId, name: e.name, load: e.load, weightLb: e.weightLb, reps, set, pr });
+        }
+        fold(b, e.weightLb, reps);
+      });
+      if (e.reps.some((r) => r > 0)) b.sessions++;
+    }
+  }
+  return out;
+}
+
 // ---------- All-time records (for History) ----------
 
 export interface LiftRecords {
