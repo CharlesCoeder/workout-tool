@@ -1,4 +1,4 @@
-import type { Action, DemoState, Phase, PlannedExercise, SessionState, WarmupStep } from './types';
+import type { Action, DemoState, Phase, PlannedExercise, SessionState, SetResult, WarmupStep } from './types';
 import { loadingDistance } from './plates';
 
 export interface SessionOptions {
@@ -68,6 +68,17 @@ export function needsRerack(a: PlannedExercise | undefined, b: PlannedExercise |
   if (!pa) return true; // coming from bodyweight/nothing: must load
   if (a!.load !== b!.load) return true; // pair <-> single always moves plates
   return loadingDistance(pa, pb) > 0;
+}
+
+/** The most recently logged set in the whole session (by timestamp), or null. */
+export function lastLoggedSet(s: SessionState): { ex: number; set: number; result: SetResult } | null {
+  let best: { ex: number; set: number; result: SetResult } | null = null;
+  s.exercises.forEach((e, ex) => {
+    e.results.forEach((result, set) => {
+      if (!best || result.at > best.result.at || (result.at === best.result.at && ex >= best.ex)) best = { ex, set, result };
+    });
+  });
+  return best;
 }
 
 function nextIncompleteExercise(s: SessionState, from: number): number {
@@ -142,8 +153,62 @@ function advance(s: SessionState, now: number, opts: SessionOptions): SessionSta
   return startRest(moved, now, opts, ex);
 }
 
+/** Corrections and notes are allowed in every phase, including summary and while paused. */
+function correct(s: SessionState, a: Action): SessionState | null {
+  switch (a.type) {
+    case 'editSet': {
+      const ex = s.exercises[a.ex];
+      const r = ex?.results[a.set];
+      if (!r) return s;
+      const reps = Math.max(0, Math.round(a.reps));
+      if (reps === r.reps) return s;
+      const results = ex.results.map((x, i) => (i === a.set ? { ...x, reps } : x));
+      return { ...s, exercises: s.exercises.map((e, i) => (i === a.ex ? { ...e, results } : e)) };
+    }
+    case 'note': {
+      const text = a.text.trim();
+      const note = text ? text : undefined;
+      if (a.ex === undefined) {
+        if ((s.note ?? undefined) === note) return s;
+        const { note: _old, ...rest } = s;
+        return note ? { ...rest, note } : rest;
+      }
+      const ex = s.exercises[a.ex];
+      if (!ex || (ex.note ?? undefined) === note) return s;
+      const exercises = s.exercises.map((e, i) => {
+        if (i !== a.ex) return e;
+        const { note: _old, ...rest } = e;
+        return note ? { ...rest, note } : rest;
+      });
+      return { ...s, exercises };
+    }
+    case 'undoSet': {
+      const last = lastLoggedSet(s);
+      if (!last) return s;
+      const exercises = s.exercises.map((e, i) =>
+        i === last.ex ? { ...e, results: e.results.filter((_, k) => k !== last.set), skipped: undefined } : e,
+      );
+      // Back to that set, ready to log it again. A summary re-opens; a paused timer is dropped
+      // (the working phase has none) but the session stays paused.
+      const { endedAt: _ended, ...rest } = s;
+      return {
+        ...rest,
+        exercises,
+        cursor: { ex: last.ex, set: last.set },
+        phase: { kind: 'working' },
+        paused: s.paused ? { remainingMs: null } : null,
+        demo: s.demo.enlarged ? { ...s.demo, enlarged: false } : s.demo,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): SessionState {
   const p = s.phase;
+  const corrected = correct(s, a);
+  if (corrected) return corrected;
   if (p.kind === 'summary' && a.type !== 'endSession') return s;
 
   // Pause / resume work in any phase.

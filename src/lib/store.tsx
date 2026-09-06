@@ -105,7 +105,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const persistRecord = useCallback(
     async (s: SessionState) => {
       const hasResults = s.exercises.some((e) => e.results.length > 0);
-      if (!hasResults && s.phase.kind !== 'summary') return;
+      if (!hasResults && s.phase.kind !== 'summary') {
+        // The only logged set was undone: nothing to keep (and no stale record either).
+        await backend.remove(`${base}/sessions/${s.id}`);
+        return;
+      }
       await backend.set(`${base}/sessions/${s.id}`, toRecord(s));
     },
     [backend, base],
@@ -122,7 +126,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       liveRef.current = next;
       setLive(next);
       await backend.set(`${base}/live`, next);
-      if (a.type === 'logReps' || a.type === 'endSession' || next.phase.kind === 'summary') await persistRecord(next);
+      const touchesRecord = a.type === 'logReps' || a.type === 'undoSet' || a.type === 'editSet' || a.type === 'note' || a.type === 'endSession';
+      if (touchesRecord || next.phase.kind === 'summary') await persistRecord(next);
     },
     [backend, base, persistRecord],
   );

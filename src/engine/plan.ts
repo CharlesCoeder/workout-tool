@@ -81,7 +81,9 @@ export function toRecord(s: SessionState): SessionRecord {
         weightLb: e.results[0].weightLb,
         reps: e.results.map((r) => r.reps),
         maxedOut: e.maxedOut || undefined,
+        note: e.note || undefined,
       })),
+    note: s.note || undefined,
   };
 }
 

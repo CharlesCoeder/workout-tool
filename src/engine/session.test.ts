@@ -264,3 +264,102 @@ describe('planning a day', () => {
     expect(suggestNextDay(DEFAULT_PROGRAM, [toRecord(s)])?.id).toBe('C');
   });
 });
+
+describe('corrections: undo, edit, notes', () => {
+  function afterTwoSets(): SessionState {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    s = reduce(s, { type: 'go' }, T0, opts);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 30_000, opts);
+    s = reduce(s, { type: 'skipRest' }, T0 + 31_000, opts);
+    s = reduce(s, { type: 'logReps', reps: 9 }, T0 + 60_000, opts);
+    return s; // resting before B, A done: [10, 9]
+  }
+
+  it('undo takes back the last set and returns to it, dropping the rest timer', () => {
+    let s = afterTwoSets();
+    expect(s.cursor).toEqual({ ex: 1, set: 0 });
+    expect(s.phase.kind).toBe('rest');
+    s = reduce(s, { type: 'undoSet' }, T0 + 70_000, opts);
+    expect(s.exercises[0].results.map((r) => r.reps)).toEqual([10]);
+    expect(s.cursor).toEqual({ ex: 0, set: 1 });
+    expect(s.phase).toEqual({ kind: 'working' });
+    // logging again continues normally
+    s = reduce(s, { type: 'logReps', reps: 11 }, T0 + 80_000, opts);
+    expect(s.exercises[0].results.map((r) => r.reps)).toEqual([10, 11]);
+    expect(s.cursor).toEqual({ ex: 1, set: 0 });
+    expect(s.phase.kind).toBe('rest');
+  });
+
+  it('undo with nothing logged is a no-op', () => {
+    const s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    expect(reduce(s, { type: 'undoSet' }, T0 + 1, opts)).toBe(s);
+  });
+
+  it('undo re-opens a finished session', () => {
+    let s = afterTwoSets();
+    s = reduce(s, { type: 'skipRest' }, T0 + 61_000, opts);
+    s = reduce(s, { type: 'logReps', reps: 12 }, T0 + 90_000, opts);
+    s = reduce(s, { type: 'skipRest' }, T0 + 91_000, opts);
+    s = reduce(s, { type: 'logReps', reps: 8 }, T0 + 120_000, opts);
+    expect(s.phase.kind).toBe('summary');
+    expect(s.endedAt).toBe(T0 + 120_000);
+    s = reduce(s, { type: 'undoSet' }, T0 + 130_000, opts);
+    expect(s.phase.kind).toBe('working');
+    expect(s.endedAt).toBeUndefined();
+    expect(s.cursor).toEqual({ ex: 1, set: 1 });
+    expect(s.exercises[1].results.map((r) => r.reps)).toEqual([12]);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 140_000, opts);
+    expect(s.phase.kind).toBe('summary');
+    expect(toRecord(s).exercises[1].reps).toEqual([12, 10]);
+  });
+
+  it('undo un-skips an exercise that was skipped after a logged set', () => {
+    let s = afterTwoSets();
+    s = reduce(s, { type: 'skipRest' }, T0 + 61_000, opts);
+    s = reduce(s, { type: 'logReps', reps: 12 }, T0 + 90_000, opts); // B set 1
+    s = reduce(s, { type: 'skipExercise' }, T0 + 91_000, opts); // gives up on B → summary
+    expect(s.phase.kind).toBe('summary');
+    s = reduce(s, { type: 'undoSet' }, T0 + 92_000, opts);
+    expect(s.exercises[1].skipped).toBeUndefined();
+    expect(s.cursor).toEqual({ ex: 1, set: 0 });
+    expect(progress(s).setsTotal).toBe(4);
+  });
+
+  it('undo works while paused and keeps the session paused', () => {
+    let s = afterTwoSets();
+    s = reduce(s, { type: 'pause' }, T0 + 65_000, opts);
+    s = reduce(s, { type: 'undoSet' }, T0 + 66_000, opts);
+    expect(s.paused).toEqual({ remainingMs: null });
+    expect(s.phase.kind).toBe('working');
+    s = reduce(s, { type: 'resume' }, T0 + 67_000, opts);
+    expect(s.paused).toBeNull();
+    expect(s.phase.kind).toBe('working');
+  });
+
+  it('edits a logged set in place without touching the phase', () => {
+    let s = afterTwoSets();
+    const before = s;
+    s = reduce(s, { type: 'editSet', ex: 0, set: 0, reps: 12 }, T0 + 70_000, opts);
+    expect(s.exercises[0].results.map((r) => r.reps)).toEqual([12, 9]);
+    expect(s.exercises[0].results[0].at).toBe(T0 + 30_000);
+    expect(s.phase).toEqual(before.phase);
+    expect(s.cursor).toEqual(before.cursor);
+    // out of range or unchanged → no write
+    expect(reduce(s, { type: 'editSet', ex: 0, set: 5, reps: 3 }, T0 + 71_000, opts)).toBe(s);
+    expect(reduce(s, { type: 'editSet', ex: 0, set: 0, reps: 12 }, T0 + 71_000, opts)).toBe(s);
+  });
+
+  it('notes attach to the session or an exercise and clear when blank', () => {
+    let s = afterTwoSets();
+    s = reduce(s, { type: 'note', text: '  Slept badly ' }, T0, opts);
+    expect(s.note).toBe('Slept badly');
+    s = reduce(s, { type: 'note', ex: 0, text: 'Right knee clicked on rep 8' }, T0, opts);
+    expect(s.exercises[0].note).toBe('Right knee clicked on rep 8');
+    const rec = toRecord(s);
+    expect(rec.note).toBe('Slept badly');
+    expect(rec.exercises[0].note).toBe('Right knee clicked on rep 8');
+    s = reduce(s, { type: 'note', text: '' }, T0, opts);
+    expect(s.note).toBeUndefined();
+    expect(reduce(s, { type: 'note', text: '' }, T0, opts)).toBe(s);
+  });
+});

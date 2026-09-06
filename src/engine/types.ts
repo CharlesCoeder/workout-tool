@@ -111,6 +111,8 @@ export interface PlannedExercise {
   results: SetResult[];
   skipped?: boolean;
   substitutedFrom?: string;
+  /** Free text typed on the phone ("left shoulder pinched", "grip went first"). */
+  note?: string;
 }
 
 export type Phase =
@@ -153,6 +155,8 @@ export interface SessionState {
   phase: Phase;
   paused: { remainingMs: number | null } | null;
   demo: DemoState;
+  /** Session-level note, typed on the phone. */
+  note?: string;
   rev: number;
 }
 
@@ -162,6 +166,12 @@ export type Action =
   | { type: 'go' }
   | { type: 'setDone' }
   | { type: 'logReps'; reps: number }
+  /** Take back the most recently logged set (any exercise) and return to it. */
+  | { type: 'undoSet' }
+  /** Correct the reps of an already-logged set in place. */
+  | { type: 'editSet'; ex: number; set: number; reps: number }
+  /** Attach a note to the session (`ex` omitted) or to one exercise. */
+  | { type: 'note'; ex?: number; text: string }
   | { type: 'skipRest' }
   | { type: 'extendRest'; seconds: number }
   | { type: 'pause' }
@@ -203,6 +213,7 @@ export interface SessionRecordExercise {
   weightLb: number;
   reps: number[];
   maxedOut?: boolean;
+  note?: string;
 }
 
 export interface SessionRecord {
@@ -213,4 +224,5 @@ export interface SessionRecord {
   endedAt: number | null;
   completed: boolean;
   exercises: SessionRecordExercise[];
+  note?: string;
 }
