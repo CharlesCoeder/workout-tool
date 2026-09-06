@@ -20,14 +20,17 @@ households/{hid}/
   live           SessionState | null   the running session (see engine)
   demoPlayback   DemoPlayback | null   where the TV's demo player is (for the phone's scrubber)
   sessions/{id}  SessionRecord  completed (or abandoned) sessions, for history
+  bodyweight/{YYYY-MM-DD}  { lb, at }   one scale reading per local day
+  profile        Profile | null  sex, birth year, height, activity, goal, pace (for nutrition targets)
 pairings/{CODE}  { tvHid, phoneHid?, createdAt }   short-lived pairing handshake
 ```
 
 Types are in `src/engine/types.ts`. Key ones:
 
-- `Exercise` (library entry): `id, name, load: 'pair' | 'single' | 'bodyweight', sets, repMin, repMax, restSec, cue, demo, substitutes[], startWeightLb, perSide`.
+- `Exercise` (library entry): `id, name, load: 'pair' | 'single' | 'bodyweight', sets, repMin, repMax, restSec, cue, demo, substitutes[], startWeightLb, perSide, muscles[]` (main muscle first; used for the weekly balance chart).
 - `Program.days[]`: ordered `exerciseIds` with an optional per-day override of sets/reps.
-- `SessionRecord`: `{ id, dayId, startedAt, endedAt?, completed, exercises: [{ exerciseId, name, load, weightLb, reps[] }] }`. History is upserted after every logged set, so an abandoned session still counts.
+- `Settings`: rest/ready timing, beeps, voice, `progressionRule` (`firstSet` | `allSets`), `targetSessionsPerWeek`, `phoneVibrate`.
+- `SessionRecord`: `{ id, dayId, startedAt, endedAt?, completed, note?, exercises: [{ exerciseId, name, load, weightLb, reps[], note? }] }`. History is upserted after every logged set and every correction, so an abandoned session still counts and an undone set disappears.
 
 ## Session engine (pure, tested)
 
@@ -39,11 +42,23 @@ Types are in `src/engine/types.ts`. Key ones:
 
 Phases: `idle → warmup(step) → ready → [working → logging? → rest]* → summary`. One tap per set: on the remote the rep picker is shown during `working`, so tapping a number both ends the set and logs it. `logging` exists for the voice path ("done", then a number). The rest before a new exercise is the "get ready" screen: it shows the next exercise, weight, plate change and demo, and is extended by `rerackBonusSec` when the plate loading differs from what is on the bars. `ready` is only used at the start of the session and after a substitution or skip.
 
+Corrections (`undoSet`, `editSet`, `note`) are accepted in every phase, including `summary` and while paused: undo removes the most recently logged set (by timestamp), moves the cursor back to it in `working`, un-skips the exercise and re-opens a finished session. A session untouched for three hours is *stale* (`isStale`); the phone offers to discard it rather than resuming it.
+
 Planning (`src/engine/plan.ts`) turns a program day + history + inventory into a `SessionState` with a prescribed weight and plate loading per exercise. This runs on whichever device starts the session.
 
 ## Progression
 
-`src/engine/progression.ts`. For each exercise, find the most recent session containing it. If the first set reached `repMax`, prescribe the next achievable weight above the one used (one plate step, whatever the inventory makes that). Otherwise repeat the weight. If there is no next achievable weight, keep the weight and set `maxedOut: true`, which the TV shows plainly and the summary repeats. If the previous weight is no longer buildable (inventory changed), snap to the nearest buildable weight at or below it. No history → `startWeightLb` snapped to the inventory. Bodyweight exercises carry reps only. There is deliberately no automatic deload (see DECISIONS.md).
+`src/engine/progression.ts`. For each exercise, find the most recent session containing it. If it earned a step under the rule in Settings (first set reached `repMax`, or every set did), prescribe the next achievable weight above the one used (one plate step, whatever the inventory makes that). Otherwise repeat the weight. If there is no next achievable weight, keep the weight and set `maxedOut: true`, which the TV shows plainly and the summary repeats. If the previous weight is no longer buildable (inventory changed), snap to the nearest buildable weight at or below it. No history → `startWeightLb` snapped to the inventory. Bodyweight exercises carry reps only. There is deliberately no automatic deload (see DECISIONS.md); instead `stalled` counts sessions in a row that failed to beat the previous one at the same weight, and after three the TV suggests a step down for a session.
+
+## Derived analytics (pure, tested, nothing stored)
+
+Everything shown on the History and Body pages is recomputed from `sessions`, `bodyweight` and `profile` on render; there is no cached statistic that can go stale after an edit.
+
+- `records.ts`: Epley estimated 1RM, per-set and per-session volume (both dumbbells, both sides), prior bests per exercise, one PR label per set (heaviest → most reps at this weight → strongest by estimate; bodyweight by reps; never on the first session), all-time lift records, and the "aim for" rep target for a set (one more than the same set last time, bottom of the range at a new weight).
+- `stats.ts`: Monday-based weekly rollups (sessions, sets, volume, minutes, days trained), an adherence summary, sets per muscle for a week against what the program prescribes (main muscle 1, others ½), and a session-length estimate (median of recent completed sessions of that day, else warm-up + sets + rests + plate changes).
+- `forecast.ts`: for each weighted lift, steps left to the plate ceiling, observed steps-per-session rate, cadence, and weeks to the ceiling at that pace and at best; ladder jump sizes; `simulateUpgrade` merges hypothetical plates into the inventory and recomputes ladders, ceilings and which stuck lifts get room.
+- `body.ts`: an exponentially smoothed trend over daily readings (α = 0.1/day, gaps advance the smoothing by elapsed days), a three-week least-squares weekly rate, 30-day and all-time changes.
+- `nutrition.ts`: Mifflin-St Jeor resting energy × activity factor, ±500 kcal/day per pound a week with a floor, protein 0.7–1 g/lb, fat 25–35% of calories, carbs as the remainder, and an adjustment (≤ ±300 kcal, only when the trend is ≥ 100 kcal off the plan).
 
 ## Plate-loading model
 
@@ -59,8 +74,8 @@ Phone lock: the remote requests a Screen Wake Lock during a session, and Firebas
 
 ## Pages
 
-`/tv` (display only), `/remote` (controls), `/history`, `/settings`. Hash-free path routing by hand; Firebase Hosting rewrites everything to `index.html`. PWA manifest and a small service worker make the remote installable.
+`/tv` (display only, plus keyboard when the TV is a laptop casting a tab: `src/tv/keys.ts`), `/remote` (controls, week strip, weigh-in, stale-session prompt), `/history` (Overview, Lifts, Sessions, Plates), `/body` (weigh-in, trend, nutrition targets), `/settings`. Hash-free path routing by hand; Firebase Hosting rewrites everything to `index.html`. PWA manifest and a small service worker make the remote installable.
 
 ## Voice (optional, last)
 
-`src/voice/useVoice.ts` wraps the Web Speech API on the TV page behind a toggle in settings. It recognises "done", a number, "skip", "show me again", "pause", "go" and dispatches the same actions as the remote.
+`src/voice/useVoice.ts` wraps the Web Speech API on the TV page behind a toggle in settings. It recognises "done", a number, "skip", "show me again", "pause", "go", "undo" and dispatches the same actions as the remote.
