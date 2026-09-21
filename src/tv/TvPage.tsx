@@ -13,7 +13,8 @@ import { consistency, estimateSessionMs, typicalDurationMs } from '../engine/sta
 import { formatLb } from '../engine/plates';
 import { prForSet, sessionPrs, sessionVolume, targetReps, type RepTarget } from '../engine/records';
 import type { DemoPlayback, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from '../engine/types';
-import { Demo, applyDemoCommand, onDemoProgress } from '../ui/Demo';
+import { applyDemoCommand, onDemoProgress } from '../ui/Demo';
+import { DemoPlayer, DemoSlot, DemoSlots } from './DemoLayer';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
@@ -216,6 +217,7 @@ export function TvPage() {
   const timedLabel =
     p.kind === 'rest' ? 'Rest' : p.kind === 'ready' ? 'Starts in' : p.kind === 'warmup' ? 'Warm-up' : p.kind === 'working' ? `Set ${session.cursor.set + 1}` : '';
   return (
+    <DemoSlots>
     <div className={`tv ${session.paused ? 'is-paused' : ''}`}>
       {body}
       {session.demo.enlarged && ex && p.kind !== 'summary' && (
@@ -223,8 +225,11 @@ export function TvPage() {
           <div className="stage-top">
             <div>
               <div className="eyebrow accent">{ex.name}</div>
+              {/* What to have ready, without leaving the clip to find out. */}
+              <StageLoad ex={ex} s={session} />
               <div className="hint" style={{ marginTop: '0.6vmin' }}>
                 {rate !== 1 ? `${rate}× speed · ` : ''}
+                {session.demo.captions ? 'Captions on · ' : ''}
                 {session.demo.muted ? 'Sound off · ' : ''}Controls are on your phone
               </div>
             </div>
@@ -243,12 +248,13 @@ export function TvPage() {
               )}
             </div>
           </div>
-          <Demo demo={ex.demo} rate={rate} muted={session.demo.muted} primary className="stage-video" />
+          <DemoSlot kind="stage" className="stage-video" />
           <div className="cue" style={{ textAlign: 'center', maxWidth: '60em' }}>
             {ex.cue}
           </div>
         </div>
       )}
+      {ex && p.kind !== 'summary' && <DemoPlayer ex={ex} demo={session.demo} />}
       {session.paused && !session.demo.enlarged && (
         <div className="paused-badge">
           <span className="badge warn pulse">Paused</span>
@@ -267,6 +273,23 @@ export function TvPage() {
           {[staleHint, voiceHint, soundHint].filter(Boolean).join(' · ')}
         </div>
       )}
+    </div>
+    </DemoSlots>
+  );
+}
+
+/**
+ * What to have on the bars, on one line beside the enlarged clip. Realising mid-video that
+ * the next exercise needs different plates should not mean closing the video to find out.
+ */
+function StageLoad({ ex, s }: { ex: PlannedExercise; s: SessionState }) {
+  return (
+    <div className="stage-load">
+      <b>{weightLabel(ex.weightLb, ex.load)}</b>
+      {ex.loading && <PlateBar perEnd={ex.loading.perEnd} tone="accent" />}
+      <span className="muted">
+        Set {Math.min(s.cursor.set + 1, ex.sets)} of {ex.sets} · {repsTarget(ex)}
+      </span>
     </div>
   );
 }
@@ -411,6 +434,17 @@ function TargetLine({ target, size = 'big' }: { target: RepTarget | null; size?:
     <div className={`target ${size}`}>
       <b>Aim for {target.reps}</b>
       <span className="muted"> · {why}</span>
+    </div>
+  );
+}
+
+/** Where the clip went during a set: it is still there, paused, one tap away on the phone. */
+function ParkedClip({ ex }: { ex: PlannedExercise }) {
+  if (!ex.demo) return null;
+  return (
+    <div className="parked">
+      <span className="eyebrow">Demo</span>
+      <span className="hint">Paused where you left it. "Show demo" on your phone brings it back.</span>
     </div>
   );
 }
@@ -569,7 +603,6 @@ function TvWarmup({ s, now, inv }: { s: SessionState; now: number; inv: Inventor
 
 function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory }) {
   const ex = currentExercise(s)!;
-  const rate = s.demo.rate;
   const plan = rackPlanFor(s, s.cursor.ex, inv);
   return (
     <>
@@ -591,8 +624,8 @@ function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory
           <div className="cue" style={{ fontSize: '2.7vmin' }}>{ex.cue}</div>
           <LastTime ex={ex} />
         </div>
-        <div className="col side wide">
-          <Demo demo={ex.demo} rate={rate} muted={s.demo.muted} primary={!s.demo.enlarged} />
+        <div className={`col side ${s.demo.shown ? 'wide' : ''}`}>
+          {s.demo.shown ? <DemoSlot /> : <ParkedClip ex={ex} />}
           <div className="muted" style={{ textAlign: 'center' }}>
             {repsTarget(ex)} · {modeLabel(ex.load)}
           </div>
@@ -609,7 +642,6 @@ function TvReady({ s, now, inv }: { s: SessionState; now: number; inv: Inventory
 
 function TvWorking({ s }: { s: SessionState }) {
   const ex = currentExercise(s)!;
-  const rate = s.demo.rate;
   return (
     <>
       <Top s={s} />
@@ -631,8 +663,8 @@ function TvWorking({ s }: { s: SessionState }) {
           <SetDots ex={ex} current={s.cursor.set} />
           <LastTime ex={ex} />
         </div>
-        <div className="col side wide">
-          <Demo demo={ex.demo} rate={rate} muted={s.demo.muted} primary={!s.demo.enlarged} />
+        <div className={`col side ${s.demo.shown ? 'wide' : ''}`}>
+          {s.demo.shown ? <DemoSlot /> : <ParkedClip ex={ex} />}
           <div className="cue" style={{ fontSize: '2.6vmin', textAlign: 'center' }}>
             {ex.cue}
           </div>
@@ -729,7 +761,7 @@ function TvRest({ s, now, inv, history }: { s: SessionState; now: number; inv: I
             )}
             {!sameExercise && <Flags ex={ex} />}
           </div>
-          {!sameExercise && <Demo demo={ex.demo} rate={s.demo.rate} muted={s.demo.muted} primary={!s.demo.enlarged} />}
+          {s.demo.shown && <DemoSlot />}
         </div>
       </div>
       <div className="bottom">

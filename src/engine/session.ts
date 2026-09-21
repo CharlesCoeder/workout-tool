@@ -4,22 +4,29 @@ import { loadingDistance } from './plates';
 export interface SessionOptions {
   readySec: number;
   rerackBonusSec: number;
+  /** Leave the clip on screen while a set runs. Off: it parks where it was, paused. */
+  demoDuringSets?: boolean;
+  /** Loudness for a clip with no level of its own, 0–100. */
+  demoVolume?: number;
+  /** Captions on by default. */
+  demoCaptions?: boolean;
 }
 
-export const DEFAULT_OPTIONS: SessionOptions = { readySec: 20, rerackBonusSec: 30 };
+export const DEFAULT_OPTIONS: SessionOptions = { readySec: 20, rerackBonusSec: 30, demoDuringSets: false, demoVolume: 70, demoCaptions: false };
 
-export const DEFAULT_DEMO: DemoState = { enlarged: false, rate: 1, muted: false, seq: 0, cmd: null };
+export const DEFAULT_DEMO: DemoState = { shown: true, enlarged: false, rate: 1, muted: false, volume: 70, captions: false, seq: 0, cmd: null };
 
 // ---------- Creation ----------
 
 export function createSession(
   args: { id: string; dayId: string; dayName: string; warmup: WarmupStep[]; exercises: PlannedExercise[] },
   now: number,
+  opts: SessionOptions = DEFAULT_OPTIONS,
 ): SessionState {
   const warmup = args.warmup.filter((w) => w.seconds > 0);
   const phase: Phase = warmup.length
     ? { kind: 'warmup', step: 0, endsAt: now + warmup[0].seconds * 1000 }
-    : { kind: 'ready', endsAt: now + DEFAULT_OPTIONS.readySec * 1000 };
+    : { kind: 'ready', endsAt: now + opts.readySec * 1000 };
   return {
     id: args.id,
     dayId: args.dayId,
@@ -30,7 +37,7 @@ export function createSession(
     cursor: { ex: 0, set: 0 },
     phase,
     paused: null,
-    demo: DEFAULT_DEMO,
+    demo: demoFor(DEFAULT_DEMO, args.exercises[0], opts),
     rev: 0,
   };
 }
@@ -103,9 +110,23 @@ function nextIncompleteExercise(s: SessionState, from: number): number {
   return -1;
 }
 
-/** Enter the working phase; the enlarged demo gets out of the way. */
-function toWorking(s: SessionState): SessionState {
-  return { ...s, phase: { kind: 'working' }, demo: s.demo.enlarged ? { ...s.demo, enlarged: false } : s.demo };
+/**
+ * Enter the working phase. The clip comes off the screen unless you asked for it during
+ * sets; it is not rewound, so bringing it back picks up where you were.
+ */
+function toWorking(s: SessionState, opts: SessionOptions): SessionState {
+  const shown = !!opts.demoDuringSets && s.demo.shown;
+  if (!s.demo.enlarged && s.demo.shown === shown) return { ...s, phase: { kind: 'working' } };
+  return { ...s, phase: { kind: 'working' }, demo: { ...s.demo, enlarged: false, shown } };
+}
+
+/**
+ * The clip state a new exercise starts from: on screen, at normal speed, at this clip's
+ * own loudness. Speed is a "let me look at this bit" gesture, not a preference, so it
+ * never follows you into the next exercise; sound on/off and captions do.
+ */
+function demoFor(d: DemoState, ex: PlannedExercise | undefined, opts: SessionOptions): DemoState {
+  return { ...d, shown: true, enlarged: false, rate: 1, volume: ex?.demoVolume ?? opts.demoVolume ?? DEFAULT_DEMO.volume };
 }
 
 // ---------- Settle: roll time forward through expired timers (pure) ----------
@@ -125,7 +146,7 @@ export function settle(s: SessionState, now: number, opts: SessionOptions = DEFA
       continue;
     }
     if ((p.kind === 'ready' || p.kind === 'rest') && now >= p.endsAt) {
-      state = toWorking(state);
+      state = toWorking(state, opts);
       continue;
     }
     break;
@@ -163,7 +184,7 @@ function advance(s: SessionState, now: number, opts: SessionOptions): SessionSta
   }
   const nextEx = nextIncompleteExercise(s, s.cursor.ex + 1);
   if (nextEx < 0) return finish(s, now);
-  const moved = { ...s, cursor: { ex: nextEx, set: s.exercises[nextEx].results.length } };
+  const moved = { ...s, cursor: { ex: nextEx, set: s.exercises[nextEx].results.length }, demo: demoFor(s.demo, s.exercises[nextEx], opts) };
   return startRest(moved, now, opts, ex);
 }
 
@@ -177,6 +198,15 @@ function correct(s: SessionState, a: Action): SessionState | null {
       const reps = Math.max(0, Math.round(a.reps));
       if (reps === r.reps) return s;
       const results = ex.results.map((x, i) => (i === a.set ? { ...x, reps } : x));
+      return { ...s, exercises: s.exercises.map((e, i) => (i === a.ex ? { ...e, results } : e)) };
+    }
+    case 'editSetWeight': {
+      const ex = s.exercises[a.ex];
+      const r = ex?.results[a.set];
+      if (!r || ex.load === 'bodyweight') return s;
+      const weightLb = Math.max(0, a.weightLb);
+      if (Math.abs(weightLb - r.weightLb) < 1e-9) return s;
+      const results = ex.results.map((x, i) => (i === a.set ? { ...x, weightLb } : x));
       return { ...s, exercises: s.exercises.map((e, i) => (i === a.ex ? { ...e, results } : e)) };
     }
     case 'note': {
@@ -238,10 +268,16 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
     return { ...s, paused: null, phase };
   }
   // Demo controls work while paused too: that is exactly when you want to study the clip.
-  if (a.type === 'showDemo') return s.demo.enlarged ? s : { ...s, demo: { ...s.demo, enlarged: true } };
+  if (a.type === 'showDemo') return s.demo.enlarged && s.demo.shown ? s : { ...s, demo: { ...s.demo, enlarged: true, shown: true } };
   if (a.type === 'hideDemo') return s.demo.enlarged ? { ...s, demo: { ...s.demo, enlarged: false } } : s;
+  if (a.type === 'demoShown') return s.demo.shown === a.shown ? s : { ...s, demo: { ...s.demo, shown: a.shown, enlarged: a.shown && s.demo.enlarged } };
   if (a.type === 'demoRate') return { ...s, demo: { ...s.demo, rate: Math.min(2, Math.max(0.25, a.rate)) } };
   if (a.type === 'demoMuted') return s.demo.muted === a.muted ? s : { ...s, demo: { ...s.demo, muted: a.muted } };
+  if (a.type === 'demoVolume') {
+    const volume = Math.round(Math.min(100, Math.max(0, a.volume)));
+    return s.demo.volume === volume ? s : { ...s, demo: { ...s.demo, volume, muted: volume === 0 ? s.demo.muted : false } };
+  }
+  if (a.type === 'demoCaptions') return s.demo.captions === a.captions ? s : { ...s, demo: { ...s.demo, captions: a.captions } };
   if (a.type === 'demoCommand') return { ...s, demo: { ...s.demo, seq: s.demo.seq + 1, cmd: a.cmd } };
 
   if (s.paused) return s; // everything else waits for resume
@@ -259,7 +295,7 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
       return { ...s, phase: { kind: 'ready', endsAt: now + opts.readySec * 1000 } };
     }
     case 'go': {
-      if (p.kind === 'ready' || p.kind === 'rest') return toWorking(s);
+      if (p.kind === 'ready' || p.kind === 'rest') return toWorking(s, opts);
       if (p.kind === 'warmup') return { ...s, phase: { kind: 'ready', endsAt: now + opts.readySec * 1000 } };
       return s;
     }
@@ -279,11 +315,16 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
     }
     case 'skipRest': {
       if (p.kind !== 'rest' && p.kind !== 'ready') return s;
-      return toWorking(s);
+      return toWorking(s, opts);
     }
     case 'extendRest': {
+      // Negative seconds take time off; the countdown never goes below zero, and landing
+      // on zero starts the set exactly as waiting it out would.
       if (!isTimed(p)) return s;
-      return { ...s, phase: { ...p, endsAt: Math.max(now, p.endsAt) + a.seconds * 1000 } };
+      const endsAt = Math.max(now, Math.max(now, p.endsAt) + a.seconds * 1000);
+      if (endsAt === p.endsAt) return s;
+      const phase: Phase = p.kind === 'rest' ? { ...p, endsAt, durationSec: Math.max(0, p.durationSec + a.seconds) } : { ...p, endsAt };
+      return settle({ ...s, phase }, now, opts);
     }
     case 'overrideWeight': {
       const ex = currentExercise(s);
@@ -302,7 +343,7 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
         substitutedFrom: ex.substitutedFrom ?? ex.exerciseId,
       };
       const exercises = s.exercises.map((e, i) => (i === s.cursor.ex ? replacement : e));
-      const st = { ...s, exercises, cursor: { ex: s.cursor.ex, set: 0 } };
+      const st = { ...s, exercises, cursor: { ex: s.cursor.ex, set: 0 }, demo: demoFor(s.demo, replacement, opts) };
       if (p.kind === 'warmup') return st;
       const rerack = needsRerack(ex, replacement);
       const sec = opts.readySec + (rerack ? opts.rerackBonusSec : 0);
@@ -315,7 +356,7 @@ function apply(s: SessionState, a: Action, now: number, opts: SessionOptions): S
       const st = { ...s, exercises };
       const nextEx = nextIncompleteExercise(st, s.cursor.ex + 1);
       if (nextEx < 0) return finish(st, now);
-      const moved = { ...st, cursor: { ex: nextEx, set: st.exercises[nextEx].results.length } };
+      const moved = { ...st, cursor: { ex: nextEx, set: st.exercises[nextEx].results.length }, demo: demoFor(s.demo, st.exercises[nextEx], opts) };
       if (p.kind === 'warmup') return moved;
       const rerack = needsRerack(ex, moved.exercises[nextEx]);
       const sec = opts.readySec + (rerack ? opts.rerackBonusSec : 0);

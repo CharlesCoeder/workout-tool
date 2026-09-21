@@ -25,6 +25,8 @@ export function normalizeExercise(e: Partial<Exercise> & { id: string }): Exerci
     notes: e.notes,
     // Programs saved before muscle tags existed borrow the default library's tags by id.
     muscles: arr<string>(e.muscles).length ? arr<string>(e.muscles) : (DEFAULT_PROGRAM.exercises[e.id]?.muscles ?? []),
+    requires: e.requires === undefined ? (DEFAULT_PROGRAM.exercises[e.id]?.requires ?? []) : arr<string>(e.requires),
+    demoVolume: typeof e.demoVolume === 'number' ? Math.round(Math.min(100, Math.max(0, e.demoVolume))) : undefined,
   };
 }
 
@@ -47,6 +49,8 @@ export function normalizeInventory(i: Partial<Inventory> | null): Inventory {
     collarsPerHandle: i.collarsPerHandle ?? DEFAULT_INVENTORY.collarsPerHandle,
     handles: i.handles ?? DEFAULT_INVENTORY.handles,
     plates: arr(i.plates),
+    // Inventories saved before gear existed are assumed to have whatever the default has.
+    gear: i.gear === undefined ? DEFAULT_INVENTORY.gear : arr<string>(i.gear),
   };
 }
 
@@ -83,7 +87,10 @@ export function normalizeRecord(r: SessionRecord): SessionRecord {
     ...r,
     endedAt: r.endedAt ?? null,
     completed: !!r.completed,
-    exercises: arr<SessionRecord['exercises'][number]>(r.exercises).map((e) => ({ ...e, reps: arr(e.reps) })),
+    exercises: arr<SessionRecord['exercises'][number]>(r.exercises).map((e) => {
+      const weights = arr<number>(e.weights);
+      return { ...e, reps: arr(e.reps), weights: weights.length ? weights : undefined };
+    }),
   };
 }
 

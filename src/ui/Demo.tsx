@@ -109,6 +109,10 @@ interface PlayerProps {
   rate: number;
   /** Sound may come out of this player (it is the primary one, the user hasn't muted, and the page has had a click). */
   audible: boolean;
+  /** How loud, 0–100. Clips are mastered at wildly different levels; this evens them out. */
+  volume: number;
+  /** Show the clip's captions, for the ones that carry them. */
+  captions: boolean;
   /** Reports its position for the phone's scrubber. Only one player per screen should be primary. */
   primary: boolean;
   className: string;
@@ -120,13 +124,32 @@ const YT_PLAYING = 1;
 const YT_PAUSED = 2;
 const YT_BUFFERING = 3;
 
-function YouTubeDemo({ id, start = 0, rate, audible, primary, className }: PlayerProps & { id: string; start?: number }) {
+/** Captions and volume, applied defensively: an old player may not have every method. */
+function setCaptions(p: YTPlayer, on: boolean) {
+  try {
+    if (on) {
+      p.loadModule('captions');
+      p.setOption('captions', 'track', { languageCode: 'en' });
+    } else {
+      p.setOption('captions', 'track', {});
+      p.unloadModule('captions');
+    }
+  } catch {
+    /* clip has no captions, or the player isn't ready */
+  }
+}
+
+function YouTubeDemo({ id, start = 0, rate, audible, volume, captions, primary, className }: PlayerProps & { id: string; start?: number }) {
   const host = useRef<HTMLDivElement>(null);
   const player = useRef<YTPlayer>(null);
   const rateRef = useRef(rate);
   rateRef.current = rate;
   const audibleRef = useRef(audible);
   audibleRef.current = audible;
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const captionsRef = useRef(captions);
+  captionsRef.current = captions;
   // When we last unmuted, and whether a pause was asked for: an unrequested pause right
   // after unmuting means the browser refused sound, so we fall back to muted playback.
   const unmutedAt = useRef(0);
@@ -234,11 +257,19 @@ function YouTubeDemo({ id, start = 0, rate, audible, primary, className }: Playe
           disablekb: 1,
           fs: 0,
           start,
+          cc_load_policy: captionsRef.current ? 1 : 0,
+          cc_lang_pref: 'en',
         },
         events: {
           onReady: (e: { target: YTPlayer }) => {
             e.target.mute();
             e.target.setPlaybackRate(rateRef.current);
+            try {
+              e.target.setVolume(volumeRef.current);
+            } catch {
+              /* not ready */
+            }
+            if (captionsRef.current) setCaptions(e.target, true);
             e.target.playVideo();
             if (audibleRef.current) setSound(e.target, true);
           },
@@ -287,10 +318,25 @@ function YouTubeDemo({ id, start = 0, rate, audible, primary, className }: Playe
     if (p && typeof p.unMute === 'function') setSound(p, audible);
   }, [audible]);
 
-  return <div className={`demo youtube ${className}`} ref={host} />;
+  useEffect(() => {
+    try {
+      player.current?.setVolume?.(volume);
+    } catch {
+      /* ignore */
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    const p = player.current;
+    if (p && typeof p.loadModule === 'function') setCaptions(p, captions);
+  }, [captions]);
+
+  // With captions on the player is shown at its true size: the overscan that hides
+  // YouTube's chrome would cut the subtitles off the bottom.
+  return <div className={`demo youtube ${captions ? 'cc' : ''} ${className}`} ref={host} />;
 }
 
-function VideoDemo({ url, rate, audible, primary, className }: PlayerProps & { url: string }) {
+function VideoDemo({ url, rate, audible, volume, captions, primary, className }: PlayerProps & { url: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   const pauseRequested = useRef(false);
   const report = useProgressReporting(primary, () => {
@@ -363,6 +409,22 @@ function VideoDemo({ url, rate, audible, primary, className }: PlayerProps & { u
     if (ref.current) ref.current.playbackRate = rate;
   }, [rate]);
   useEffect(() => {
+    if (ref.current) ref.current.volume = Math.min(1, Math.max(0, volume / 100));
+  }, [volume]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const apply = () => {
+      for (const t of Array.from(el.textTracks)) {
+        if (t.kind !== 'subtitles' && t.kind !== 'captions') continue;
+        t.mode = captions ? 'showing' : 'disabled';
+      }
+    };
+    apply();
+    el.textTracks.addEventListener?.('addtrack', apply);
+    return () => el.textTracks.removeEventListener?.('addtrack', apply);
+  }, [captions]);
+  useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.muted = !audible;
@@ -385,6 +447,8 @@ export function Demo({
   demo,
   rate = 1,
   muted = false,
+  volume = 100,
+  captions = false,
   primary = true,
   className = '',
 }: {
@@ -392,6 +456,10 @@ export function Demo({
   rate?: number;
   /** User turned the sound off (from the phone). */
   muted?: boolean;
+  /** Loudness, 0–100. */
+  volume?: number;
+  /** Show the clip's captions. */
+  captions?: boolean;
   /** The one player on screen that carries sound and reports its position. */
   primary?: boolean;
   className?: string;
@@ -408,7 +476,8 @@ export function Demo({
       </div>
     );
   }
-  const audible = primary && !muted && activated;
-  if (demo.type === 'video') return <VideoDemo url={demo.url} rate={rate} audible={audible} primary={primary} className={className} />;
-  return <YouTubeDemo id={demo.id} start={demo.start ?? 0} rate={rate} audible={audible} primary={primary} className={className} />;
+  const audible = primary && !muted && volume > 0 && activated;
+  const common = { rate, audible, volume, captions, primary, className };
+  if (demo.type === 'video') return <VideoDemo url={demo.url} {...common} />;
+  return <YouTubeDemo id={demo.id} start={demo.start ?? 0} {...common} />;
 }

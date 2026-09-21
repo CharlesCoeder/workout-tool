@@ -1,5 +1,6 @@
 import { Link, usePath } from './lib/router';
 import { useApp } from './lib/store';
+import { useWakeLock } from './lib/useWakeLock';
 import { TvPage } from './tv/TvPage';
 import { RemotePage } from './remote/RemotePage';
 import { HistoryPage } from './history/HistoryPage';
@@ -40,6 +41,9 @@ function Landing() {
 
 export function App() {
   const path = usePath();
+  // Whatever page you are on: a workout app should not need you to change your phone's
+  // display timeout, or to poke the screen mid-set. Settings turns it off.
+  useWakeLock(useApp().settings.keepAwake);
   if (path.startsWith('/tv')) return <TvPage />;
   if (path.startsWith('/remote')) return <RemotePage />;
   if (path.startsWith('/history')) return <HistoryPage />;

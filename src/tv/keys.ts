@@ -3,7 +3,8 @@ import type { Action, SessionState } from '../engine/types';
 /**
  * Keyboard control for the TV page, for when it is a laptop casting a tab: Enter or Space
  * does the obvious thing for the phase, digits then Enter log reps, P pauses, U undoes,
- * D toggles the demo, + adds 30 s of rest. The remote is never required.
+ * D toggles the enlarged demo, S puts the clip on or off the screen, + and − move the rest
+ * by 30 s. The remote is never required.
  */
 
 export interface KeyResult {
@@ -25,7 +26,9 @@ export function keyAction(key: string, s: SessionState | null, buffer: string): 
   if (lower === 'p') return { action: { type: s.paused ? 'resume' : 'pause' }, buffer };
   if (lower === 'u') return { action: { type: 'undoSet' }, buffer: '' };
   if (lower === 'd') return { action: { type: s.demo.enlarged ? 'hideDemo' : 'showDemo' }, buffer };
+  if (lower === 's') return { action: { type: 'demoShown', shown: !s.demo.shown }, buffer };
   if (key === '+' || key === '=') return { action: k === 'rest' || k === 'ready' ? { type: 'extendRest', seconds: 30 } : null, buffer };
+  if (key === '-' || key === '_') return { action: k === 'rest' || k === 'ready' ? { type: 'extendRest', seconds: -30 } : null, buffer };
 
   if (key === 'Enter' || key === ' ') {
     if (s.paused) return { action: { type: 'resume' }, buffer };
@@ -38,4 +41,4 @@ export function keyAction(key: string, s: SessionState | null, buffer: string): 
   return { action: null, buffer };
 }
 
-export const KEY_HINT = 'Keys: Enter/Space go · digits + Enter log reps · P pause · U undo · D demo · + 30 s';
+export const KEY_HINT = 'Keys: Enter/Space go · digits + Enter log reps · P pause · U undo · D full-screen demo · S show/hide demo · +/− 30 s';

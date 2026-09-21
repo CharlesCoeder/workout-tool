@@ -1,5 +1,5 @@
 import type { Day, Exercise, Inventory, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionState } from './types';
-import { createSession } from './session';
+import { createSession, DEFAULT_OPTIONS, type SessionOptions } from './session';
 import { loadingFor } from './plates';
 import { prescribe } from './progression';
 
@@ -27,6 +27,7 @@ export function planExercise(
     demo: ex.demo ?? null,
     perSide: !!ex.perSide,
     substitutes: ex.substitutes ?? [],
+    demoVolume: ex.demoVolume,
     prescribedLb: pres.weightLb,
     weightLb: pres.weightLb,
     loading,
@@ -60,10 +61,38 @@ export function planSession(
   now: number,
   id = `${now}-${Math.random().toString(36).slice(2, 8)}`,
   rule: ProgressionRule = 'firstSet',
+  opts: SessionOptions = DEFAULT_OPTIONS,
 ): SessionState {
   const day = program.days.find((d) => d.id === dayId);
   if (!day) throw new Error(`Unknown day ${dayId}`);
-  return createSession({ id, dayId, dayName: day.name, warmup: program.warmup, exercises: planDay(program, day, history, inv, rule) }, now);
+  return createSession({ id, dayId, dayName: day.name, warmup: program.warmup, exercises: planDay(program, day, history, inv, rule) }, now, opts);
+}
+
+// ---------- Gear ----------
+
+/** Gear an exercise needs that the inventory doesn't list. Empty means you can do it today. */
+export function missingGear(ex: Pick<Exercise, 'requires'>, inv: Inventory): string[] {
+  const have = new Set(inv.gear ?? []);
+  return (ex.requires ?? []).filter((g) => !have.has(g));
+}
+
+export function canDo(ex: Pick<Exercise, 'requires'>, inv: Inventory): boolean {
+  return missingGear(ex, inv).length === 0;
+}
+
+/**
+ * Substitutes that use gear you own and the planned exercise does not. The floor press is
+ * in the program because the program assumes a floor; owning a bench is a reason to offer
+ * the swap, never to make it silently (see DECISIONS).
+ */
+export function betterWithGear(exerciseId: string, program: Program, inv: Inventory): Exercise[] {
+  const ex = program.exercises[exerciseId];
+  if (!ex) return [];
+  const own = new Set(inv.gear ?? []);
+  const already = new Set(ex.requires ?? []);
+  return (ex.substitutes ?? [])
+    .map((id) => program.exercises[id])
+    .filter((sub): sub is Exercise => !!sub && canDo(sub, inv) && (sub.requires ?? []).some((g) => own.has(g) && !already.has(g)));
 }
 
 /** Convert a live session into the history record shape. */
@@ -82,6 +111,8 @@ export function toRecord(s: SessionState): SessionRecord {
         name: e.name,
         load: e.load,
         weightLb: e.results[0].weightLb,
+        // Only written when a set was done at a different weight (a mid-exercise change).
+        weights: e.results.some((r) => Math.abs(r.weightLb - e.results[0].weightLb) > 1e-9) ? e.results.map((r) => r.weightLb) : undefined,
         reps: e.results.map((r) => r.reps),
         maxedOut: e.maxedOut || undefined,
         note: e.note || undefined,

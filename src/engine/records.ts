@@ -1,4 +1,4 @@
-import type { LoadMode, PlannedExercise, Program, SessionRecord, SessionState } from './types';
+import type { LoadMode, PlannedExercise, Program, ProgressionRule, SessionRecord, SessionRecordExercise, SessionState } from './types';
 import { formatLb } from './plates';
 
 /**
@@ -23,11 +23,21 @@ function perSideOf(program: Program | undefined, exerciseId: string): boolean {
   return !!program?.exercises[exerciseId]?.perSide;
 }
 
+/**
+ * The weight of each set. `weightLb` is the exercise's working weight (the first set's);
+ * `weights` appears only when a set was done at a different one, so older records and
+ * ordinary exercises cost nothing.
+ */
+export function setWeights(e: SessionRecordExercise): number[] {
+  return e.reps.map((_, i) => (e.weights && e.weights.length > i ? e.weights[i] : e.weightLb));
+}
+
 /** Total pounds moved in a recorded session (bodyweight sets count 0). */
 export function recordVolume(rec: SessionRecord, program?: Program): number {
   return rec.exercises.reduce((sum, e) => {
     const ps = perSideOf(program, e.exerciseId);
-    return sum + e.reps.reduce((n, r) => n + setVolume(e.weightLb, r, e.load, ps), 0);
+    const ws = setWeights(e);
+    return sum + e.reps.reduce((n, r, i) => n + setVolume(ws[i], r, e.load, ps), 0);
   }, 0);
 }
 
@@ -78,7 +88,8 @@ export function priorBest(history: SessionRecord[], exerciseId: string, excludeS
     for (const e of s.exercises) {
       if (e.exerciseId !== exerciseId || !e.reps.length) continue;
       counted = true;
-      for (const r of e.reps) fold(b, e.weightLb, r);
+      const ws = setWeights(e);
+      e.reps.forEach((r, i) => fold(b, ws[i], r));
     }
     if (counted) b.sessions++;
   }
@@ -159,12 +170,13 @@ export function allPrs(history: SessionRecord[]): HistoryPr[] {
       const b = best.get(e.exerciseId) ?? emptyBest();
       best.set(e.exerciseId, b);
       const eligible = b.sessions >= 1;
+      const ws = setWeights(e);
       e.reps.forEach((reps, set) => {
         if (eligible) {
-          const pr = prAgainst(b, e.load, e.weightLb, reps);
-          if (pr) out.push({ sessionId: s.id, at: s.startedAt, exerciseId: e.exerciseId, name: e.name, load: e.load, weightLb: e.weightLb, reps, set, pr });
+          const pr = prAgainst(b, e.load, ws[set], reps);
+          if (pr) out.push({ sessionId: s.id, at: s.startedAt, exerciseId: e.exerciseId, name: e.name, load: e.load, weightLb: ws[set], reps, set, pr });
         }
-        fold(b, e.weightLb, reps);
+        fold(b, ws[set], reps);
       });
       if (e.reps.some((r) => r > 0)) b.sessions++;
     }
@@ -188,11 +200,12 @@ export function liftRecords(history: SessionRecord[], exerciseId: string): LiftR
     let counted = false;
     for (const e of s.exercises) {
       if (e.exerciseId !== exerciseId) continue;
-      for (const reps of e.reps) {
+      const ws = setWeights(e);
+      for (const [i, reps] of e.reps.entries()) {
         if (reps <= 0) continue;
         counted = true;
         out.totalSets++;
-        const w = e.weightLb;
+        const w = ws[i];
         if (!out.heaviest || w > out.heaviest.weightLb || (w === out.heaviest.weightLb && reps > out.heaviest.reps)) out.heaviest = { weightLb: w, reps, at: s.startedAt };
         const e1 = e1rm(w, reps);
         if (!out.bestE1rm || e1 > out.bestE1rm.e1rm) out.bestE1rm = { weightLb: w, reps, e1rm: e1, at: s.startedAt };
@@ -226,4 +239,49 @@ export function targetReps(ex: PlannedExercise, setIndex: number): RepTarget | n
   const lastReps = last.reps[Math.min(setIndex, last.reps.length - 1)];
   if (lastReps >= ex.repMax) return { reps: ex.repMax, reason: 'top', lastReps };
   return { reps: Math.min(ex.repMax, Math.max(ex.repMin, lastReps + 1)), reason: 'beat', lastReps };
+}
+
+// ---------- How far past the range to go ----------
+
+export interface RepGuidance {
+  /** The rep count this set is asking for. */
+  stopAt: number;
+  /** True when going past `stopAt` earns nothing: the weight is what moves next, not the reps. */
+  capped: boolean;
+  /** One line of why, for the screen that has room for it. */
+  note: string;
+}
+
+/**
+ * What extra reps are worth on this set. Under the program's rule the top of the range is
+ * a trigger, not a ceiling to beat: once the set that decides has reached it the weight
+ * goes up next time and further reps change nothing the app will ever read. At the plate
+ * ceiling, and on bodyweight work, reps are the only thing that can move, so they count.
+ */
+export function repGuidance(ex: PlannedExercise, setIndex: number, rule: ProgressionRule = 'firstSet'): RepGuidance {
+  const top = ex.repMax;
+  if (ex.load === 'bodyweight') {
+    return { stopAt: top, capped: false, note: `Past ${top}, make the reps harder rather than longer: slower lowering, a pause at the hard point.` };
+  }
+  if (ex.maxedOut) {
+    return { stopAt: top, capped: false, note: `You are at the top of your plates, so reps are the progress here. Every extra one counts.` };
+  }
+  if (rule === 'allSets') {
+    return { stopAt: top, capped: true, note: `${top} on every set is what adds a plate step next time. More than that changes nothing.` };
+  }
+  if (setIndex === 0) {
+    return { stopAt: top, capped: true, note: `${top} on this first set is the whole trigger: the weight goes up next time. Save the rest for the sets after it.` };
+  }
+  const first = ex.results[0]?.reps ?? 0;
+  const note =
+    first >= top
+      ? `The first set already earned the step. These are for the work, not the logbook: stop a rep or two short of failure.`
+      : `Only the first set decides the weight. Match what you can here and stop a rep or two short of failure.`;
+  return { stopAt: top, capped: true, note };
+}
+
+/** One line explaining what a rep range is for, for someone seeing "6–12" and wondering. */
+export function rangeExplainer(ex: PlannedExercise): string {
+  if (ex.load === 'bodyweight') return `${ex.repMin}–${ex.repMax} is the working range: climb it, then make the movement harder.`;
+  return `${ex.repMin}–${ex.repMax} is a ladder, not a choice: a new weight starts near ${ex.repMin}, you climb to ${ex.repMax} over sessions, then add a plate and start again.`;
 }

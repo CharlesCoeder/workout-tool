@@ -1,5 +1,12 @@
 import type { Exercise, Inventory, Program, Settings } from './types';
 
+/** Gear an exercise can need besides the dumbbells. Anything not owned is a swap prompt, never a silent change. */
+export const GEAR: { id: string; name: string; hint: string }[] = [
+  { id: 'bench', name: 'Bench', hint: 'Flat or adjustable. Unlocks pressing off a bench instead of the floor.' },
+  { id: 'step', name: 'Step or box', hint: 'Used by step-ups, calf raises and seated pressing.' },
+  { id: 'pullup-bar', name: 'Pull-up bar', hint: 'Doorway or wall-mounted.' },
+];
+
 export const DEFAULT_INVENTORY: Inventory = {
   handleLb: 3,
   collarLb: 0.5,
@@ -9,6 +16,7 @@ export const DEFAULT_INVENTORY: Inventory = {
     { lb: 5, count: 4 },
     { lb: 2.5, count: 4 },
   ],
+  gear: ['step'],
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +28,10 @@ export const DEFAULT_SETTINGS: Settings = {
   progressionRule: 'firstSet',
   targetSessionsPerWeek: 3,
   phoneVibrate: true,
+  demoDuringSets: false,
+  demoCaptions: false,
+  demoVolume: 70,
+  keepAwake: true,
 };
 
 // Main muscle first: it gets full credit for a set in the weekly balance chart, the rest get half.
@@ -44,9 +56,22 @@ const MUSCLES: Record<string, string[]> = {
   'lying-extension': ['triceps'],
   'leg-raise': ['core'],
   'goblet-squat': ['quads', 'glutes'],
+  'bench-press': ['chest', 'triceps'],
+  'incline-press': ['chest', 'shoulders'],
   'pushup': ['chest', 'triceps'],
   'chinup': ['back', 'biceps'],
   'pullup': ['back', 'biceps'],
+};
+
+// Gear each exercise needs beyond dumbbells. Everything not listed here needs only the floor.
+const REQUIRES: Record<string, string[]> = {
+  'step-up': ['step'],
+  'calf-raise': ['step'],
+  'seated-press': ['step'],
+  'bench-press': ['bench'],
+  'incline-press': ['bench'],
+  'chinup': ['pullup-bar'],
+  'pullup': ['pullup-bar'],
 };
 
 // Public YouTube demos (muted, looping embeds). Replace with your own clips in Settings → Exercises.
@@ -94,6 +119,7 @@ const ex = (
   substitutes: [],
   startWeightLb,
   muscles: MUSCLES[id] ?? [],
+  requires: REQUIRES[id] ?? [],
   ...extra,
 });
 
@@ -103,7 +129,7 @@ const LIB: Exercise[] = [
     substitutes: ['goblet-squat', 'lunge'],
   }),
   ex('floor-press', 'Dumbbell Floor Press', 'pair', [6, 12], 'Lie on the floor, knees bent. Upper arms touch the floor at the bottom. Press up and slightly in.', 14, {
-    substitutes: ['pushup'],
+    substitutes: ['bench-press', 'incline-press', 'pushup'],
   }),
   ex('one-arm-row', 'One-Arm Dumbbell Row', 'single', [6, 12], 'Hand and knee on the step. Flat back. Pull the elbow to your hip, squeeze, lower slow.', 19, {
     perSide: true,
@@ -128,7 +154,7 @@ const LIB: Exercise[] = [
     substitutes: ['squat'],
   }),
   ex('seated-press', 'Seated Dumbbell Press', 'pair', [6, 12], 'Sit tall on the step, core tight. Press overhead until arms lock, lower to ear level.', 9, {
-    substitutes: ['floor-press'],
+    substitutes: ['incline-press', 'floor-press'],
   }),
   ex('bent-over-row', 'Bent-Over Dumbbell Row', 'pair', [6, 12], 'Hinge to about 45°, flat back. Row both dumbbells to your hips, elbows in. Pause, lower slow.', 14, {
     substitutes: ['one-arm-row'],
@@ -174,6 +200,12 @@ const LIB: Exercise[] = [
   }),
   ex('pushup', 'Push-Up', 'bodyweight', [6, 20], 'Hands under the shoulders, body straight. Chest to the floor, press up. Leave a couple in the tank.', 0, {
     substitutes: ['floor-press'],
+  }),
+  ex('bench-press', 'Dumbbell Bench Press', 'pair', [6, 12], 'Flat bench, feet planted. Lower to the sides of your chest with a full stretch, press up and slightly in. Nothing stops the descent the way the floor does, so control it.', 14, {
+    substitutes: ['floor-press', 'incline-press'],
+  }),
+  ex('incline-press', 'Incline Dumbbell Press', 'pair', [6, 12], 'Bench at about 30°. Lower to the top of the chest, press up. Higher angles turn it into a shoulder press.', 9, {
+    substitutes: ['bench-press', 'seated-press'],
   }),
   ex('chinup', 'Chin-Up', 'bodyweight', [4, 10], 'Palms facing you. Start from a dead hang, pull the chin over the bar, lower slow. Needs a bar.', 0, {
     substitutes: ['bent-over-row'],

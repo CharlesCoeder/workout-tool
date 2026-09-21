@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useApp, useSettled } from '../lib/store';
-import { useWakeLock } from '../lib/useWakeLock';
 import { useVibrate } from '../lib/useVibrate';
 import { joinPairing } from '../lib/pairing';
 import { Link } from '../lib/router';
 import { currentExercise, isStale, lastActivityAt, lastLoggedSet, progress, remainingMs } from '../engine/session';
 import { consistency, daysBetween, estimateSessionMs, startOfWeek, typicalDurationMs, weeklyStats } from '../engine/stats';
 import { WeekDots } from '../ui/WeekDots';
-import { planDay, planExercise, suggestNextDay, toRecord } from '../engine/plan';
+import { betterWithGear, canDo, missingGear, planDay, planExercise, suggestNextDay, toRecord } from '../engine/plan';
 import { achievableWeights, formatLb, loadingFor } from '../engine/plates';
-import { prForSet, sessionPrs, sessionVolume, targetReps } from '../engine/records';
+import { prForSet, rangeExplainer, repGuidance, sessionPrs, sessionVolume, targetReps } from '../engine/records';
 import { STALL_SESSIONS, performances } from '../engine/progression';
-import type { Day, DemoCommand, DemoPlayback, PlannedExercise, SessionState } from '../engine/types';
+import type { Day, DemoCommand, DemoPlayback, Exercise, PlannedExercise, SessionState } from '../engine/types';
 import { fmtClock, isFresh, playbackPath, positionAt } from '../engine/playback';
-import { fmtCountdown, fmtDuration, perEndLabel, repsTarget, weightLabel } from '../ui/format';
+import { fmtCountdown, fmtDuration, perEndLabel, repsTarget, resultsSummary, weightLabel } from '../ui/format';
 import { PauseIcon, PlayIcon, RestartIcon, SoundOffIcon, SoundOnIcon } from '../ui/icons';
+import { GEAR } from '../engine/defaults';
 import { PlateBar } from '../ui/PlateBar';
 import { RackChanges } from '../ui/RackChanges';
 import { rackPlanFor } from '../ui/rack';
@@ -34,7 +34,7 @@ export function RemotePage() {
   const [resumedStale, setResumedStale] = useState<string | null>(null);
   const stale = !!session && isStale(session, now) && resumedStale !== session.id;
   const active = !!session && session.phase.kind !== 'summary' && !stale;
-  useWakeLock(active);
+  // The screen is kept awake app-wide (see App.tsx), not just while a session runs.
   useVibrate(active ? session : null, now, app.settings.phoneVibrate);
 
   useEffect(() => {
@@ -63,11 +63,9 @@ export function RemotePage() {
   const ex = session ? currentExercise(session) : undefined;
 
   const closeSheet = () => setSheet(null);
-  // "Demo video" puts the clip full-screen on the TV and opens the controls.
-  const openDemo = () => {
-    void app.dispatch({ type: 'showDemo' });
-    setSheet('demo');
-  };
+  // Opening the controls does not touch the TV: the clip may already be playing, and
+  // yanking it full-screen (or restarting it) is the opposite of what you asked for.
+  const openDemo = () => setSheet('demo');
   const sheets = (
     <>
       {sheet === 'menu' && session && (
@@ -177,7 +175,7 @@ export function RemotePage() {
       body = <RepControls s={session} onWeight={() => setSheet('weight')} onSwap={() => setSheet('swap')} onDemo={() => openDemo()} />;
       break;
     case 'rest':
-      body = <RestControls s={session} now={now} onWeight={() => setSheet('weight')} onDemo={() => openDemo()} />;
+      body = <RestControls s={session} now={now} onWeight={() => setSheet('weight')} onSwap={() => setSheet('swap')} onDemo={() => openDemo()} />;
       break;
     case 'summary':
       body = <SummaryControls s={session} onEdit={() => setSheet('log')} />;
@@ -238,9 +236,32 @@ function ExerciseHero({ ex, sub }: { ex: PlannedExercise; sub?: string }) {
         {ex.blocked && <span className="pill warn">maxed out on your plates</span>}
         {!ex.blocked && ex.maxedOut && ex.load !== 'bodyweight' && <span className="pill warn">at your plate ceiling</span>}
         {ex.stalled >= STALL_SESSIONS && <span className="pill warn">no progress · {ex.stalled} sessions</span>}
-        {ex.weightLb !== ex.prescribedLb && <span className="pill">overridden</span>}
       </div>
     </div>
+  );
+}
+
+/**
+ * The seed program assumes the floor and a step. If you own gear that one of this
+ * exercise's substitutes uses, say so once, where a swap is one tap away. The plan itself
+ * is never rewritten behind your back.
+ */
+function GearOffer({ ex, onSwap }: { ex: PlannedExercise; onSwap: () => void }) {
+  const app = useApp();
+  const offer = useMemo(() => {
+    if (ex.substitutedFrom) return null;
+    const subs = betterWithGear(ex.exerciseId, app.program, app.inventory);
+    if (!subs.length) return null;
+    const own = new Set(app.inventory.gear ?? []);
+    const already = new Set(app.program.exercises[ex.exerciseId]?.requires ?? []);
+    const id = subs[0].requires?.find((g) => own.has(g) && !already.has(g));
+    return { sub: subs[0], gear: GEAR.find((g) => g.id === id)?.name.toLowerCase() ?? id };
+  }, [ex.exerciseId, ex.substitutedFrom, app.program, app.inventory]);
+  if (!offer) return null;
+  return (
+    <button className="notice tappable" onClick={onSwap}>
+      You have a {offer.gear}: {offer.sub.name} swaps in for this, for today or for good.
+    </button>
   );
 }
 
@@ -417,6 +438,7 @@ function ReadyControls({
       <div style={{ fontSize: 15 }}>
         <RackChanges changes={plan.changes} handles={app.inventory.handles} />
       </div>
+      <GearOffer ex={ex} onSwap={onSwap} />
       <div className="count">{fmtCountdown(remainingMs(s, now))}</div>
       <div className="actions">
         <button className="btn primary big wide" onClick={() => void app.dispatch({ type: 'go' })}>
@@ -445,6 +467,7 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
   const hi = ex.repMax + 4;
   const nums = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   const target = targetReps(ex, s.cursor.set);
+  const guide = repGuidance(ex, s.cursor.set, app.settings.progressionRule);
   return (
     <>
       <ExerciseHero ex={ex} sub={`Set ${s.cursor.set + 1} of ${ex.sets} · in progress`} />
@@ -460,15 +483,18 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
         How many reps did you get{ex.perSide ? ' (per side)' : ''}? Tap the number when you're done.
       </div>
       <div className="reps">
-        {nums.map((n) => (
-          <button
-            key={n}
-            className={`${n >= ex.repMax ? 'top' : n >= ex.repMin ? 'in' : ''} ${target && n === target.reps ? 'target' : ''}`}
-            onClick={() => void app.dispatch({ type: 'logReps', reps: n })}
-          >
-            {n}
-          </button>
-        ))}
+        {nums.map((n) => {
+          const over = n > guide.stopAt;
+          const tone = over ? (guide.capped ? 'over' : 'top') : n === guide.stopAt ? 'top' : n >= ex.repMin ? 'in' : '';
+          return (
+            <button key={n} className={`${tone} ${target && n === target.reps ? 'target' : ''}`} onClick={() => void app.dispatch({ type: 'logReps', reps: n })}>
+              {n}
+            </button>
+          );
+        })}
+      </div>
+      <div className="faint" style={{ fontSize: 13 }}>
+        {guide.note} {!target && rangeExplainer(ex)}
       </div>
       <div className="actions">
         <button className="btn ghost small" onClick={() => void app.dispatch({ type: 'logReps', reps: 0 })}>
@@ -492,7 +518,7 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
   );
 }
 
-function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: number; onWeight: () => void; onDemo: () => void }) {
+function RestControls({ s, now, onWeight, onSwap, onDemo }: { s: SessionState; now: number; onWeight: () => void; onSwap: () => void; onDemo: () => void }) {
   const app = useApp();
   const p = s.phase as Extract<SessionState['phase'], { kind: 'rest' }>;
   const ex = currentExercise(s)!;
@@ -547,13 +573,25 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
             <RackChanges changes={plan.changes} handles={app.inventory.handles} />
           </div>
         )}
+        {!sameExercise && <GearOffer ex={ex} onSwap={onSwap} />}
+      </div>
+      <div className="nudges">
+        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: -30 })} aria-label="Thirty seconds less rest">
+          −30 s
+        </button>
+        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: -5 })} aria-label="Five seconds less rest">
+          −5 s
+        </button>
+        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: 5 })} aria-label="Five seconds more rest">
+          +5 s
+        </button>
+        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: 30 })} aria-label="Thirty seconds more rest">
+          +30 s
+        </button>
       </div>
       <div className="actions">
         <button className="btn primary big wide" onClick={() => void app.dispatch({ type: 'skipRest' })}>
           Skip rest
-        </button>
-        <button className="btn" onClick={() => void app.dispatch({ type: 'extendRest', seconds: 30 })}>
-          +30 s
         </button>
         {ex.load !== 'bodyweight' ? (
           <button className="btn" onClick={onWeight}>
@@ -562,7 +600,7 @@ function RestControls({ s, now, onWeight, onDemo }: { s: SessionState; now: numb
         ) : (
           <span />
         )}
-        <button className="btn ghost wide" onClick={onDemo}>
+        <button className="btn ghost" onClick={onDemo}>
           Demo video
         </button>
       </div>
@@ -613,10 +651,7 @@ function SummaryControls({ s, onEdit }: { s: SessionState; onEdit: () => void })
             <div key={e.exerciseId} className="stack" style={{ gap: 4 }}>
               <div className="row spread">
                 <span>{e.name}</span>
-                <span className="muted">
-                  {e.load !== 'bodyweight' ? `${formatLb(e.results[0].weightLb)} lb × ` : ''}
-                  {e.results.map((r) => r.reps).join(', ')}
-                </span>
+                <span className="muted">{resultsSummary(e.results, e.load)}</span>
               </div>
               {mine.length > 0 && (
                 <div className="row wrap" style={{ gap: 6 }}>
@@ -700,34 +735,62 @@ function SwapSheet({
 }) {
   const app = useApp();
   const lib = app.program.exercises;
-  const subs = ex.substitutes.map((id) => lib[id]).filter(Boolean);
+  const inv = app.inventory;
+  const day = app.program.days.find((d) => d.id === session.dayId);
+  // What the program has in this slot: after one swap, the entry is still the original.
+  const slotId = ex.substitutedFrom ?? ex.exerciseId;
+  const inProgram = !!day?.entries.some((e) => e.exerciseId === slotId);
+  const [keep, setKeep] = useState(false);
+  const rank = (e: Exercise) => (canDo(e, inv) ? 0 : 1);
+  const subs = ex.substitutes
+    .map((id) => lib[id])
+    .filter(Boolean)
+    .sort((a, b) => rank(a) - rank(b));
   const inSession = new Set(session.exercises.map((e) => e.exerciseId));
   const others = Object.values(lib)
     .filter((e) => e.id !== ex.exerciseId && !subs.includes(e) && !inSession.has(e.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   const pick = async (id: string) => {
     const target = lib[id];
-    const planned = planExercise(target, app.history, app.inventory, { sets: ex.sets }, ex.loading?.perEnd, app.settings.progressionRule);
+    const planned = planExercise(target, app.history, inv, { sets: ex.sets }, ex.loading?.perEnd, app.settings.progressionRule);
     await app.dispatch({ type: 'substitute', exercise: planned });
-    onDone(`Swapped to ${target.name}`);
+    if (keep && day && inProgram) {
+      const days = app.program.days.map((d) =>
+        d.id !== day.id ? d : { ...d, entries: d.entries.map((e) => (e.exerciseId === slotId ? { ...e, exerciseId: id } : e)) },
+      );
+      await app.saveProgram({ ...app.program, days });
+    }
+    onDone(keep && inProgram ? `${target.name} from now on` : `Swapped to ${target.name}`);
     onClose();
   };
-  const Item = ({ id, name }: { id: string; name: string }) => (
-    <button className="item" onClick={() => void pick(id)}>
-      <span>{name}</span>
-      <span className="muted" style={{ fontSize: 13 }}>
-        {lib[id].load === 'bodyweight' ? 'bodyweight' : lib[id].load}
-      </span>
-    </button>
-  );
+  const Item = ({ e }: { e: Exercise }) => {
+    const missing = missingGear(e, inv);
+    const gearNames = missing.map((g) => GEAR.find((x) => x.id === g)?.name.toLowerCase() ?? g).join(' and ');
+    return (
+      <button className={`item ${missing.length ? 'dim' : ''}`} onClick={() => void pick(e.id)}>
+        <span>{e.name}</span>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {missing.length ? `needs a ${gearNames}` : e.load === 'bodyweight' ? 'bodyweight' : e.load}
+        </span>
+      </button>
+    );
+  };
   return (
     <BottomSheet onClose={onClose} title={`Swap ${ex.name}`}>
+      {inProgram && day && (
+        <label className="check">
+          <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+          <span>
+            Keep it: put this in {day.name} in place of {lib[slotId]?.name ?? ex.name} from now on.
+          </span>
+        </label>
+      )}
       {subs.length > 0 && (
         <>
           <div className="eyebrow">Substitutes</div>
           <div className="list">
             {subs.map((e) => (
-              <Item key={e.id} id={e.id} name={e.name} />
+              <Item key={e.id} e={e} />
             ))}
           </div>
         </>
@@ -735,7 +798,7 @@ function SwapSheet({
       <div className="eyebrow">Anything else</div>
       <div className="list">
         {others.map((e) => (
-          <Item key={e.id} id={e.id} name={e.name} />
+          <Item key={e.id} e={e} />
         ))}
       </div>
     </BottomSheet>
@@ -759,8 +822,23 @@ const OPTIMISTIC_MS = 3000;
 function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: PlannedExercise; now: number; onClose: () => void }) {
   const app = useApp();
   const d = session.demo;
-  const cmd = (c: DemoCommand) => void app.dispatch({ type: 'demoCommand', cmd: c });
+  // A control that moves the playhead implies you want to see it, so it comes back first.
+  const ensureShown = () => {
+    if (!d.shown) void app.dispatch({ type: 'demoShown', shown: true });
+  };
+  const cmd = (c: DemoCommand) => {
+    ensureShown();
+    void app.dispatch({ type: 'demoCommand', cmd: c });
+  };
   const timed = session.phase.kind === 'rest' || session.phase.kind === 'ready' || session.phase.kind === 'warmup';
+  const libEx = app.program.exercises[ex.exerciseId];
+  const savedVolume = libEx?.demoVolume;
+  const [savedLevel, setSavedLevel] = useState(false);
+  const saveVolume = async () => {
+    if (!libEx) return;
+    await app.saveProgram({ ...app.program, exercises: { ...app.program.exercises, [libEx.id]: { ...libEx, demoVolume: d.volume } } });
+    setSavedLevel(true);
+  };
 
   const feed = usePlayback();
   const fresh = isFresh(feed, session.id, ex.exerciseId, now);
@@ -825,6 +903,7 @@ function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: P
     setFlip({ playing: !playing, at: now });
     cmd(fresh ? { type: playing ? 'pause' : 'play' } : { type: 'toggle' });
   };
+  // A clip parked off-screen is paused, so "play" means "bring it back and carry on".
 
   const canScrub = fresh && duration > 0;
   const pct = canScrub ? Math.min(100, (pos / duration) * 100) : 0;
@@ -832,15 +911,18 @@ function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: P
     <BottomSheet onClose={onClose} title={ex.name}>
       {!ex.demo && <div className="notice">No demo clip for this exercise yet. Add one in Settings → Exercises.</div>}
       <div className="row">
-        <button className={`btn grow ${d.enlarged ? '' : 'primary'}`} onClick={() => void app.dispatch({ type: d.enlarged ? 'hideDemo' : 'showDemo' })}>
-          {d.enlarged ? 'Hide from TV' : 'Show on TV'}
+        <button className={`btn grow ${d.shown ? '' : 'primary'}`} onClick={() => void app.dispatch({ type: 'demoShown', shown: !d.shown })}>
+          {d.shown ? 'Take off the TV' : 'Show on TV'}
         </button>
-        {timed && (
-          <button className={`btn grow ${session.paused ? 'primary' : 'ghost'}`} onClick={() => void app.dispatch({ type: session.paused ? 'resume' : 'pause' })}>
-            {session.paused ? 'Resume timer' : 'Pause timer'}
-          </button>
-        )}
+        <button className={`btn grow ${d.enlarged ? 'primary' : ''}`} onClick={() => void app.dispatch({ type: d.enlarged ? 'hideDemo' : 'showDemo' })}>
+          {d.enlarged ? 'Exit full screen' : 'Full screen'}
+        </button>
       </div>
+      {timed && (
+        <button className={`btn ${session.paused ? 'primary' : 'ghost'}`} onClick={() => void app.dispatch({ type: session.paused ? 'resume' : 'pause' })}>
+          {session.paused ? 'Resume timer' : 'Pause timer'}
+        </button>
+      )}
       <div className="eyebrow">Playback</div>
       <div className="scrub">
         <input
@@ -885,11 +967,53 @@ function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: P
         >
           {d.muted ? <SoundOffIcon /> : <SoundOnIcon />}
         </button>
+        <button
+          className={`btn grow ${d.captions ? 'primary' : ''}`}
+          onClick={() => void app.dispatch({ type: 'demoCaptions', captions: !d.captions })}
+          aria-label={d.captions ? 'Turn captions off' : 'Turn captions on'}
+          aria-pressed={d.captions}
+          style={{ fontWeight: 700 }}
+        >
+          CC
+        </button>
       </div>
       {ex.demo && !fresh && (
         <div className="faint" style={{ fontSize: 13 }}>
-          The TV isn't playing this clip right now{d.enlarged ? '' : ': "Show on TV" puts it up'}.
+          The TV isn't playing this clip right now{d.shown ? '' : ': "Show on TV" puts it back up'}.
         </div>
+      )}
+      {d.captions && (
+        <div className="faint" style={{ fontSize: 13 }}>
+          Captions only appear on clips that carry them, and the frame is shown at its true size while they are on.
+        </div>
+      )}
+      <div className="row spread">
+        <span className="eyebrow">Volume</span>
+        <span className="muted" style={{ fontSize: 14 }}>
+          {d.muted ? 'sound off' : `${d.volume}%`}
+        </span>
+      </div>
+      <div className="scrub">
+        <input
+          type="range"
+          aria-label="Clip volume"
+          min={0}
+          max={100}
+          step={5}
+          value={d.volume}
+          style={{ '--pct': `${d.volume}%` } as CSSProperties}
+          onChange={(e) => {
+            setSavedLevel(false);
+            void app.dispatch({ type: 'demoVolume', volume: Number(e.target.value) });
+          }}
+        />
+      </div>
+      {libEx && (
+        <button className="btn small ghost" disabled={savedLevel || savedVolume === d.volume} onClick={() => void saveVolume()}>
+          {savedLevel || savedVolume === d.volume
+            ? `${formatVolume(d.volume)} is this clip's level`
+            : `Always start ${libEx.name} at ${formatVolume(d.volume)}`}
+        </button>
       )}
       <div className="eyebrow">Speed</div>
       <div className="rates">
@@ -900,11 +1024,14 @@ function DemoSheet({ session, ex, now, onClose }: { session: SessionState; ex: P
         ))}
       </div>
       <p className="faint" style={{ fontSize: 13, margin: 0 }}>
-        The clip hides on its own when the set starts. Speed and sound stay until you change them.
+        Full screen grows the same player: nothing reloads and you keep your place. The clip comes off the TV when the set starts, paused where
+        you left it, and the next exercise starts at normal speed.
       </p>
     </BottomSheet>
   );
 }
+
+const formatVolume = (v: number) => (v === 0 ? 'silent' : `${v}%`);
 
 function PairSheet({ onClose, onDone }: { onClose: () => void; onDone: (m: string) => void }) {
   const app = useApp();

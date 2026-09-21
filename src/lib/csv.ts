@@ -1,5 +1,5 @@
 import type { Program, SessionRecord } from '../engine/types';
-import { setVolume } from '../engine/records';
+import { setVolume, setWeights } from '../engine/records';
 
 function cell(v: unknown): string {
   const s = v === null || v === undefined ? '' : String(v);
@@ -15,8 +15,9 @@ export function sessionsCsv(history: SessionRecord[], program?: Program): string
     const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     for (const e of s.exercises) {
       const perSide = !!program?.exercises[e.exerciseId]?.perSide;
+      const ws = setWeights(e);
       e.reps.forEach((reps, i) => {
-        rows.push([date, time, s.dayName, s.id, e.name, e.exerciseId, e.load, i + 1, e.load === 'bodyweight' ? '' : e.weightLb, reps, setVolume(e.weightLb, reps, e.load, perSide), e.note ?? '', s.note ?? '']);
+        rows.push([date, time, s.dayName, s.id, e.name, e.exerciseId, e.load, i + 1, e.load === 'bodyweight' ? '' : ws[i], reps, setVolume(ws[i], reps, e.load, perSide), e.note ?? '', s.note ?? '']);
       });
     }
   }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { commandFor, parseSpokenNumber } from './useVoice';
 import type { SessionState } from '../engine/types';
+import { DEFAULT_DEMO } from '../engine/session';
 
 const base = (phase: SessionState['phase'], paused = false): SessionState =>
-  ({ id: 's', dayId: 'A', dayName: 'A', startedAt: 0, warmup: [], exercises: [], cursor: { ex: 0, set: 0 }, phase, paused: paused ? { remainingMs: 0 } : null, demo: { enlarged: false, rate: 1, muted: false, seq: 0, cmd: null }, rev: 0 });
+  ({ id: 's', dayId: 'A', dayName: 'A', startedAt: 0, warmup: [], exercises: [], cursor: { ex: 0, set: 0 }, phase, paused: paused ? { remainingMs: 0 } : null, demo: DEFAULT_DEMO, rev: 0 });
 
 describe('voice parsing', () => {
   it('parses numbers in words and digits', () => {

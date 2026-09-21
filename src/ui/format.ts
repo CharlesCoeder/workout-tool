@@ -1,5 +1,6 @@
 import { formatLb } from '../engine/plates';
-import type { LoadMode, PlannedExercise } from '../engine/types';
+import { setWeights } from '../engine/records';
+import type { LoadMode, PlannedExercise, SessionRecordExercise, SetResult } from '../engine/types';
 
 export function fmtCountdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -40,4 +41,28 @@ export function repsTarget(ex: PlannedExercise): string {
 
 export function repsList(reps: number[]): string {
   return reps.join(', ');
+}
+
+/**
+ * The sets of one exercise in a line. Normally "14 lb × 10, 9, 8"; when a set was done at
+ * a different weight, each set carries its own so the change is visible rather than lost.
+ */
+export function setsSummary(sets: { weightLb: number; reps: number }[], load: LoadMode): string {
+  const reps = sets.map((r) => r.reps).join(', ');
+  if (load === 'bodyweight' || !sets.length) return reps;
+  const even = sets.every((r) => Math.abs(r.weightLb - sets[0].weightLb) < 1e-9);
+  if (even) return `${formatLb(sets[0].weightLb)} lb × ${reps}`;
+  return sets.map((r) => `${formatLb(r.weightLb)} × ${r.reps}`).join(', ');
+}
+
+export function resultsSummary(results: SetResult[], load: LoadMode): string {
+  return setsSummary(results, load);
+}
+
+export function recordSummary(e: SessionRecordExercise): string {
+  const ws = setWeights(e);
+  return setsSummary(
+    e.reps.map((reps, i) => ({ weightLb: ws[i], reps })),
+    e.load,
+  );
 }

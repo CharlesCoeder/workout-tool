@@ -50,6 +50,7 @@ describe('TV keyboard', () => {
     expect(s.phase.kind).toBe('rest');
     expect(keyAction('Enter', s, '').action).toEqual({ type: 'go' });
     expect(keyAction('+', s, '').action).toEqual({ type: 'extendRest', seconds: 30 });
+    expect(keyAction('-', s, '').action).toEqual({ type: 'extendRest', seconds: -30 });
   });
 
   it('digits build a rep count during the set and Enter logs it', () => {
@@ -88,5 +89,13 @@ describe('TV keyboard', () => {
     expect(keyAction('d', s, '').action).toEqual({ type: 'hideDemo' });
     expect(keyAction('Escape', s, '9')).toEqual({ action: null, buffer: '' });
     expect(keyAction('Escape', s, '')).toEqual({ action: { type: 'hideDemo' }, buffer: '' });
+  });
+
+  it('S takes the clip off the screen and puts it back', () => {
+    let s = reduce(session(), { type: 'skipWarmup' }, T0, opts);
+    expect(s.demo.shown).toBe(true);
+    expect(keyAction('s', s, '').action).toEqual({ type: 'demoShown', shown: false });
+    s = reduce(s, { type: 'demoShown', shown: false }, T0, opts);
+    expect(keyAction('S', s, '').action).toEqual({ type: 'demoShown', shown: true });
   });
 });

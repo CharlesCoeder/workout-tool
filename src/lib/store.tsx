@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Action, Inventory, Program, SessionRecord, SessionState, Settings } from '../engine/types';
-import { reduce, settle } from '../engine/session';
+import { reduce, settle, type SessionOptions } from '../engine/session';
 import { planSession, toRecord } from '../engine/plan';
 import { getBackend, type Backend } from '../backend';
 import {
@@ -49,6 +49,17 @@ export interface AppStore {
 }
 
 const Ctx = createContext<AppStore | null>(null);
+
+/** The slice of settings the pure session engine needs. */
+export function sessionOptions(s: Settings): SessionOptions {
+  return {
+    readySec: s.readySec,
+    rerackBonusSec: s.rerackBonusSec,
+    demoDuringSets: s.demoDuringSets,
+    demoVolume: s.demoVolume,
+    demoCaptions: s.demoCaptions,
+  };
+}
 
 function initialHid(mode: 'local' | 'firebase'): string {
   if (mode === 'local') return 'local';
@@ -142,13 +153,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const cur = liveRef.current;
       if (!cur) return;
       const t = backend.now();
-      const opts = { readySec: settingsRef.current.readySec, rerackBonusSec: settingsRef.current.rerackBonusSec };
-      const next = reduce(cur, a, t, opts);
+      const next = reduce(cur, a, t, sessionOptions(settingsRef.current));
       if (next === cur) return;
       liveRef.current = next;
       setLive(next);
       await backend.set(`${base}/live`, next);
-      const touchesRecord = a.type === 'logReps' || a.type === 'undoSet' || a.type === 'editSet' || a.type === 'note' || a.type === 'endSession';
+      const touchesRecord =
+        a.type === 'logReps' || a.type === 'undoSet' || a.type === 'editSet' || a.type === 'editSetWeight' || a.type === 'note' || a.type === 'endSession';
       if (touchesRecord || next.phase.kind === 'summary') await persistRecord(next);
     },
     [backend, base, persistRecord],
@@ -156,12 +167,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startSession = useCallback(
     async (dayId: string) => {
-      const s = planSession(program, dayId, history, inventory, backend.now(), undefined, settings.progressionRule);
+      const s = planSession(program, dayId, history, inventory, backend.now(), undefined, settings.progressionRule, sessionOptions(settings));
       liveRef.current = s;
       setLive(s);
       await backend.set(`${base}/live`, s);
     },
-    [backend, base, program, history, inventory, settings.progressionRule],
+    [backend, base, program, history, inventory, settings],
   );
 
   const clearLive = useCallback(async () => {
@@ -230,9 +241,6 @@ export function useNow(intervalMs = 250): number {
 export function useSettled(): { session: SessionState | null; now: number } {
   const { live, settings } = useApp();
   const t = useNow();
-  const session = useMemo(
-    () => (live ? settle(live, t, { readySec: settings.readySec, rerackBonusSec: settings.rerackBonusSec }) : null),
-    [live, t, settings.readySec, settings.rerackBonusSec],
-  );
+  const session = useMemo(() => (live ? settle(live, t, sessionOptions(settings)) : null), [live, t, settings]);
   return { session, now: t };
 }

@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../lib/store';
 import { TopNav } from '../lib/router';
 import { formatLb, maxWeight } from '../engine/plates';
-import { e1rm, liftRecords, recordSets, recordVolume } from '../engine/records';
+import { e1rm, liftRecords, recordSets, recordVolume, setWeights } from '../engine/records';
 import type { SessionRecord } from '../engine/types';
-import { fmtDate, fmtDuration, weightLabel } from '../ui/format';
+import { fmtDate, fmtDuration, recordSummary, weightLabel } from '../ui/format';
 import { downloadText, sessionsCsv } from '../lib/csv';
 import { Overview } from './Overview';
 import { PlatesTab } from './PlatesTab';
@@ -63,7 +63,8 @@ function Lifts() {
         if (!e.reps.length) continue;
         const lib = app.program.exercises[e.exerciseId];
         const entry = byEx.get(e.exerciseId) ?? { name: lib?.name ?? e.name, points: [] };
-        entry.points.push({ t: s.startedAt, weight: e.weightLb, reps: e.reps, repMax: lib?.repMax ?? 12, e1rm: Math.max(0, ...e.reps.map((r) => e1rm(e.weightLb, r))) });
+        const ws = setWeights(e);
+        entry.points.push({ t: s.startedAt, weight: e.weightLb, reps: e.reps, repMax: lib?.repMax ?? 12, e1rm: Math.max(0, ...e.reps.map((r, i) => e1rm(ws[i], r))) });
         byEx.set(e.exerciseId, entry);
       }
     }
@@ -227,8 +228,8 @@ function SessionCard({ s, onDelete }: { s: SessionRecord; onDelete: () => void }
                 {e.name}
                 {e.note && <div className="faint" style={{ fontSize: 13 }}>{e.note}</div>}
               </td>
-              <td className="muted">{weightLabel(e.weightLb, e.load)}</td>
-              <td className="muted">{e.reps.join(', ')}</td>
+              <td className="muted">{e.weights ? 'per set' : weightLabel(e.weightLb, e.load)}</td>
+              <td className="muted">{e.weights ? recordSummary(e) : e.reps.join(', ')}</td>
             </tr>
           ))}
         </tbody>

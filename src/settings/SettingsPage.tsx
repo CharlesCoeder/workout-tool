@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../lib/store';
 import { TopNav } from '../lib/router';
-import { DEFAULT_INVENTORY, DEFAULT_PROGRAM, DEFAULT_SETTINGS } from '../engine/defaults';
+import { DEFAULT_INVENTORY, DEFAULT_PROGRAM, DEFAULT_SETTINGS, GEAR } from '../engine/defaults';
 import { achievableWeights, formatLb } from '../engine/plates';
 import type { Day, DayEntry, Exercise, Inventory, Program, Settings, WarmupStep } from '../engine/types';
 import { youtubeIdFrom } from '../ui/Demo';
 import { getStoredHid, setStoredHid } from '../lib/household';
 import { MUSCLES } from '../engine/stats';
+import { useWakeLock } from '../lib/useWakeLock';
+import { missingGear } from '../engine/plan';
 
 type Tab = 'program' | 'exercises' | 'equipment' | 'timing' | 'data';
 
@@ -380,6 +382,46 @@ function ExerciseForm({ ex, all, onChange, onDelete }: { ex: Exercise; all: Exer
         </div>
       )}
       <div className="field">
+        <label>
+          Clip volume {draft.demoVolume === undefined ? '(using the default)' : `(${draft.demoVolume}%)`}
+        </label>
+        <div className="row" style={{ gap: 10 }}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={draft.demoVolume ?? app.settings.demoVolume}
+            onChange={(e) => set({ demoVolume: Number(e.target.value) })}
+            style={{ flex: 1 }}
+          />
+          <button className="btn small ghost" disabled={draft.demoVolume === undefined} onClick={() => set({ demoVolume: undefined })}>
+            Use default
+          </button>
+        </div>
+        <span className="muted" style={{ fontSize: 13 }}>
+          Clips are mastered at wildly different levels. Set this once and every session starts this one where you want it. You can also set it
+          from the phone while it plays.
+        </span>
+      </div>
+      <div className="field">
+        <label>Needs (besides dumbbells)</label>
+        <div className="row wrap" style={{ gap: 6 }}>
+          {GEAR.map((g) => {
+            const on = (draft.requires ?? []).includes(g.id);
+            return (
+              <button
+                key={g.id}
+                className={`pill ${on ? 'accent' : ''}`}
+                onClick={() => set({ requires: on ? (draft.requires ?? []).filter((x) => x !== g.id) : [...(draft.requires ?? []), g.id] })}
+              >
+                {g.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="field">
         <label>Muscles worked (tap in order: the first is the main one and counts a full set in the weekly balance, the rest count half)</label>
         <div className="row wrap" style={{ gap: 6 }}>
           {MUSCLES.map((m) => {
@@ -439,9 +481,31 @@ function EquipmentTab({ onSaved }: { onSaved: (m?: string) => void }) {
   const pair = achievableWeights(inv, 'pair');
   const single = achievableWeights(inv, 'single');
   const dirty = JSON.stringify(inv) !== JSON.stringify(app.inventory);
+  const gear = new Set(inv.gear ?? []);
+  const toggleGear = (id: string) => {
+    const next = gear.has(id) ? (inv.gear ?? []).filter((g) => g !== id) : [...(inv.gear ?? []), id];
+    void app.saveInventory({ ...app.inventory, gear: next });
+    onSaved('Equipment saved');
+  };
   return (
     <div className="stack">
       <p className="muted">Everything the app prescribes is derived from this. Bought plates? Add them here and the ceiling moves.</p>
+      <div className="card stack">
+        <h3 style={{ margin: 0 }}>What else you have</h3>
+        <div className="row wrap" style={{ gap: 8 }}>
+          {GEAR.map((g) => (
+            <button key={g.id} className={`pill ${gear.has(g.id) ? 'accent' : ''}`} onClick={() => toggleGear(g.id)}>
+              {g.name}
+            </button>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Exercises that need gear you don't have are marked when you swap, and the ones you do have are offered: the seed program presses off
+          the floor because it assumes a floor, so a bench turns up as a swap on the get-ready screen rather than rewriting your days behind your
+          back. {GEAR.map((g) => g.hint).join(' ')}
+        </p>
+        <GearGaps inv={inv} />
+      </div>
       <div className="card stack">
         <div className="grid2">
           <div className="field">
@@ -575,6 +639,34 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
         </p>
       </div>
       <div className="card stack">
+        <h3 style={{ margin: 0 }}>Screen</h3>
+        <label className="row">
+          <input type="checkbox" checked={s.keepAwake} onChange={(e) => save({ keepAwake: e.target.checked })} />
+          <span>Keep the screen on while the app is open</span>
+        </label>
+        <WakeLockNote on={s.keepAwake} />
+      </div>
+      <div className="card stack">
+        <h3 style={{ margin: 0 }}>Demo clips</h3>
+        <label className="row">
+          <input type="checkbox" checked={s.demoDuringSets} onChange={(e) => save({ demoDuringSets: e.target.checked })} />
+          <span>Leave the clip on the TV during a set</span>
+        </label>
+        <label className="row">
+          <input type="checkbox" checked={s.demoCaptions} onChange={(e) => save({ demoCaptions: e.target.checked })} />
+          <span>Captions on by default (clips that have them)</span>
+        </label>
+        <div className="field">
+          <label>Volume for clips with no level of their own ({s.demoVolume}%)</label>
+          <input type="range" min={0} max={100} step={5} value={s.demoVolume} onChange={(e) => save({ demoVolume: Number(e.target.value) })} />
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>
+          Off, the clip comes off the screen when a set starts and waits, paused, where you left it: "Show on TV" on the phone brings it back at
+          the same spot. A clip that is too loud or too quiet gets its own level from the phone, saved against that exercise, so you only fix it
+          once. Speed always goes back to normal on a new exercise.
+        </p>
+      </div>
+      <div className="card stack">
         <label className="row">
           <input type="checkbox" checked={s.countdownBeeps} onChange={(e) => save({ countdownBeeps: e.target.checked })} />
           <span>Countdown beeps on the TV (3, 2, 1, go)</span>
@@ -592,6 +684,43 @@ function TimingTab({ onSaved }: { onSaved: (m?: string) => void }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/** Anything in the program that needs gear the inventory doesn't list. */
+function GearGaps({ inv }: { inv: Inventory }) {
+  const app = useApp();
+  const gaps = app.program.days.flatMap((d) =>
+    d.entries
+      .map((e) => app.program.exercises[e.exerciseId])
+      .filter((ex) => ex && missingGear(ex, inv).length > 0)
+      .map((ex) => `${ex.name} (${d.name})`),
+  );
+  if (!gaps.length) return null;
+  return (
+    <p className="notice">
+      Your program has {gaps.join(', ')}, which need gear you haven't ticked. Swap them on the phone, or in the Program tab.
+    </p>
+  );
+}
+
+/** Says what the browser actually did, rather than claiming the screen will stay on. */
+function WakeLockNote({ on }: { on: boolean }) {
+  const { supported, held } = useWakeLock(on);
+  if (!supported)
+    return (
+      <p className="muted" style={{ fontSize: 13 }}>
+        This browser has no Screen Wake Lock API, so the screen will follow your device's own display timeout. Safari has it from iOS 16.4.
+      </p>
+    );
+  return (
+    <p className="muted" style={{ fontSize: 13 }}>
+      {!on
+        ? 'Off: the screen follows your device\u2019s display timeout.'
+        : held
+          ? 'On, and holding: this screen will not dim while the app is open. It is released whenever you switch away, and re-taken when you come back.'
+          : 'On. The browser has not granted it yet \u2014 tap anywhere on the page, and keep this tab in front.'}
+    </p>
   );
 }
 

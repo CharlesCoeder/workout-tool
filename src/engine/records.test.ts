@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allPrs, e1rm, liftRecords, prForSet, priorBest, recordVolume, sessionPrs, sessionVolume, setVolume, targetReps } from './records';
+import { allPrs, e1rm, liftRecords, prForSet, priorBest, rangeExplainer, recordVolume, repGuidance, sessionPrs, sessionVolume, setVolume, setWeights, targetReps } from './records';
 import { createSession, reduce } from './session';
 import { DEFAULT_PROGRAM } from './defaults';
 import type { PlannedExercise, SessionRecord, SessionState } from './types';
@@ -7,7 +7,11 @@ import type { PlannedExercise, SessionRecord, SessionState } from './types';
 const T0 = 1_000_000;
 const opts = { readySec: 20, rerackBonusSec: 30 };
 
-function rec(id: string, startedAt: number, exercises: { exerciseId: string; weightLb: number; reps: number[]; load?: 'pair' | 'single' | 'bodyweight' }[]): SessionRecord {
+function rec(
+  id: string,
+  startedAt: number,
+  exercises: { exerciseId: string; weightLb: number; reps: number[]; weights?: number[]; load?: 'pair' | 'single' | 'bodyweight' }[],
+): SessionRecord {
   return {
     id,
     dayId: 'A',
@@ -15,7 +19,7 @@ function rec(id: string, startedAt: number, exercises: { exerciseId: string; wei
     startedAt,
     endedAt: startedAt + 1,
     completed: true,
-    exercises: exercises.map((e) => ({ exerciseId: e.exerciseId, name: e.exerciseId, load: e.load ?? 'pair', weightLb: e.weightLb, reps: e.reps })),
+    exercises: exercises.map((e) => ({ exerciseId: e.exerciseId, name: e.exerciseId, load: e.load ?? 'pair', weightLb: e.weightLb, weights: e.weights, reps: e.reps })),
   };
 }
 
@@ -193,5 +197,49 @@ describe('target reps (beat the logbook)', () => {
   it('bodyweight ignores the weight', () => {
     const ex = planned({ load: 'bodyweight', weightLb: 0, repMin: 10, repMax: 25, lastTime: { weightLb: 0, reps: [20] } });
     expect(targetReps(ex, 0)).toEqual({ reps: 21, reason: 'beat', lastReps: 20 });
+  });
+});
+
+describe('sets done at different weights', () => {
+  const dropped = rec('d1', 10, [{ exerciseId: 'one-arm-row', weightLb: 19, weights: [19, 19, 14], reps: [10, 9, 9], load: 'single' }]);
+
+  it('reads a weight per set, falling back to the working weight', () => {
+    expect(setWeights(dropped.exercises[0])).toEqual([19, 19, 14]);
+    expect(setWeights(rec('x', 1, [{ exerciseId: 'squat', weightLb: 14, reps: [10, 10] }]).exercises[0])).toEqual([14, 14]);
+  });
+
+  it('counts volume, records and bests at the weight each set was done at', () => {
+    // per-side single: (19*10 + 19*9 + 14*9) * 2
+    expect(recordVolume(dropped, DEFAULT_PROGRAM)).toBe((190 + 171 + 126) * 2);
+    expect(liftRecords([dropped], 'one-arm-row').heaviest).toEqual({ weightLb: 19, reps: 10, at: 10 });
+    expect(priorBest([dropped], 'one-arm-row').repsAtWeight.get(14)).toBe(9);
+  });
+});
+
+describe('what extra reps are worth', () => {
+  it('caps the first set: the top of the range is the trigger, not a score', () => {
+    const g = repGuidance(planned({}), 0, 'firstSet');
+    expect(g).toMatchObject({ stopAt: 12, capped: true });
+    expect(g.note).toContain('12');
+  });
+
+  it('says the later sets no longer decide the weight', () => {
+    const ex = planned({ results: [{ weightLb: 14, reps: 12, at: T0 }] });
+    expect(repGuidance(ex, 1, 'firstSet')).toMatchObject({ capped: true });
+    expect(repGuidance(ex, 1, 'firstSet').note).toContain('already earned');
+  });
+
+  it('under the every-set rule each set still has to reach the top', () => {
+    expect(repGuidance(planned({}), 2, 'allSets')).toMatchObject({ stopAt: 12, capped: true });
+  });
+
+  it('stops capping once the plates run out, or when there are no plates', () => {
+    expect(repGuidance(planned({ maxedOut: true }), 0, 'firstSet').capped).toBe(false);
+    expect(repGuidance(planned({ load: 'bodyweight', weightLb: 0, repMax: 25 }), 0, 'firstSet')).toMatchObject({ stopAt: 25, capped: false });
+  });
+
+  it('explains what a range is for', () => {
+    expect(rangeExplainer(planned({}))).toContain('6');
+    expect(rangeExplainer(planned({}))).toContain('12');
   });
 });

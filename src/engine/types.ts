@@ -11,6 +11,8 @@ export interface Inventory {
   collarsPerHandle: number;
   handles: number;
   plates: PlateType[];
+  /** Everything else you own that an exercise can need: see `GEAR` in defaults. */
+  gear: string[];
 }
 
 export type LoadMode = 'pair' | 'single' | 'bodyweight';
@@ -49,6 +51,10 @@ export interface Exercise {
   notes?: string;
   /** Muscle groups worked; the first is the main one (counts a full set, the rest count half). */
   muscles?: string[];
+  /** Gear this needs besides dumbbells ('bench', 'step', 'pullup-bar'); see `GEAR`. */
+  requires?: string[];
+  /** How loud this clip is, 0–100. Clips are mastered at wildly different levels. */
+  demoVolume?: number;
 }
 
 export interface DayEntry {
@@ -89,6 +95,14 @@ export interface Settings {
   targetSessionsPerWeek: number;
   /** Buzz the phone at 3-2-1 and go (Android; iOS has no vibration API). */
   phoneVibrate: boolean;
+  /** Leave the clip on the TV while a set runs. Off: it parks, paused, where you left it. */
+  demoDuringSets: boolean;
+  /** Turn captions on for clips that have them. */
+  demoCaptions: boolean;
+  /** Loudness for clips with no per-exercise level of their own, 0–100. */
+  demoVolume: number;
+  /** Ask the browser to keep the screen on while the app is open. */
+  keepAwake: boolean;
 }
 
 // ---------- Session ----------
@@ -111,6 +125,8 @@ export interface PlannedExercise {
   demo: Demo;
   perSide: boolean;
   substitutes: string[];
+  /** Per-exercise demo loudness, copied from the library so the TV needs no program. */
+  demoVolume?: number;
   prescribedLb: number;
   weightLb: number;
   loading: Loading | null;
@@ -144,12 +160,18 @@ export type DemoCommand =
   | { type: 'toggle' };
 
 export interface DemoState {
+  /** The clip is on the TV at all. It goes false when a set starts (unless `demoDuringSets`). */
+  shown: boolean;
   /** Demo fills the TV until hidden (auto-hides when a set starts). */
   enlarged: boolean;
-  /** Playback rate applied to every demo player on the TV. */
+  /** Playback rate applied to every demo player on the TV. Back to 1x on a new exercise. */
   rate: number;
   /** Sound off. Defaults to on: the TV plays the clip's audio once it has had one click. */
   muted: boolean;
+  /** Loudness, 0–100, starting from the exercise's own level. */
+  volume: number;
+  /** Captions on, for clips that carry them. */
+  captions: boolean;
   /** One-shot command; `seq` increments so the TV applies each once. */
   seq: number;
   cmd: DemoCommand | null;
@@ -182,6 +204,8 @@ export type Action =
   | { type: 'undoSet' }
   /** Correct the reps of an already-logged set in place. */
   | { type: 'editSet'; ex: number; set: number; reps: number }
+  /** Correct the weight an already-logged set was done at. */
+  | { type: 'editSetWeight'; ex: number; set: number; weightLb: number }
   /** Attach a note to the session (`ex` omitted) or to one exercise. */
   | { type: 'note'; ex?: number; text: string }
   | { type: 'skipRest' }
@@ -190,8 +214,12 @@ export type Action =
   | { type: 'resume' }
   | { type: 'showDemo' }
   | { type: 'hideDemo' }
+  /** Put the clip on the TV, or take it off without touching where it is up to. */
+  | { type: 'demoShown'; shown: boolean }
   | { type: 'demoRate'; rate: number }
   | { type: 'demoMuted'; muted: boolean }
+  | { type: 'demoVolume'; volume: number }
+  | { type: 'demoCaptions'; captions: boolean }
   | { type: 'demoCommand'; cmd: DemoCommand }
   | { type: 'overrideWeight'; weightLb: number; loading: Loading | null }
   | { type: 'substitute'; exercise: PlannedExercise }
@@ -222,7 +250,10 @@ export interface SessionRecordExercise {
   exerciseId: string;
   name: string;
   load: LoadMode;
+  /** What the exercise was worked at: the first set's weight. Progression reads this. */
   weightLb: number;
+  /** One weight per set, written only when a set was done at a different weight. */
+  weights?: number[];
   reps: number[];
   maxedOut?: boolean;
   note?: string;

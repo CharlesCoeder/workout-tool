@@ -237,6 +237,40 @@ input[type='checkbox'] {
   height: 136%;
   pointer-events: none;
 }
+/* Captions live in the bottom of the frame, exactly where the overscan crops. */
+.demo.youtube.cc iframe {
+  top: 0;
+  height: 100%;
+}
+
+/*
+ * One player per exercise, moved rather than re-created: the screens render an empty
+ * `.demo-slot` where the clip belongs and this box flies onto it. See tv/DemoLayer.tsx.
+ */
+.demo-layer {
+  position: fixed;
+  z-index: 15;
+  pointer-events: none;
+  transition:
+    left 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    top 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s linear;
+}
+.demo-layer .demo {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+.demo-slot {
+  background: var(--bg-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo-layer {
+    transition: opacity 0.2s linear;
+  }
+}
 .demo .placeholder {
   position: absolute;
   inset: 0;
@@ -603,6 +637,7 @@ table.plain th {
 .tv .overlay {
   position: fixed;
   inset: 0;
+  overflow: hidden;
   background: var(--bg);
   display: flex;
   flex-direction: column;
@@ -625,9 +660,31 @@ table.plain th {
 }
 .tv .demo-stage .stage-video {
   width: auto;
-  height: min(74vh, 50.6vw);
+  height: min(68vh, 50.6vw);
   aspect-ratio: 16 / 9;
   flex: 0 0 auto;
+}
+.tv .demo-stage .stage-load {
+  display: flex;
+  align-items: center;
+  gap: 1.4vmin;
+  margin-top: 0.8vmin;
+  font-size: 2.8vmin;
+}
+/* Small enough to sit on one line beside the clip (the TV default is 9vmin). */
+.tv .demo-stage .stage-load .plates {
+  font-size: 2.6vmin;
+  flex: 0 0 auto;
+}
+.tv .parked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6vmin;
+  padding: 1.6vmin 2vmin;
+  border-radius: var(--radius);
+  border: 1px dashed var(--line);
+  color: var(--fg-3);
+  text-align: center;
 }
 .tv .paused-badge {
   position: fixed;
@@ -763,6 +820,12 @@ table.plain th {
   background: var(--accent);
   color: var(--accent-ink);
 }
+/* Past the number that earns the step: still tappable, but not something to chase. */
+.remote .reps button.over {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-3);
+}
 .remote .reps button:active {
   transform: scale(0.95);
 }
@@ -773,6 +836,41 @@ table.plain th {
 }
 .remote .actions .wide {
   grid-column: 1 / -1;
+}
+/* Two to a row at phone width: the default inline padding wraps "Change weight". */
+.remote .actions .btn {
+  padding-inline: 12px;
+}
+.remote .nudges {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.remote .nudges .btn {
+  padding-inline: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.remote .check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--bg-3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--fg-2);
+}
+.remote .check input {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+.remote .list .item.dim {
+  opacity: 0.55;
+}
+.remote .error-text {
+  color: var(--danger);
 }
 .remote .footer {
   margin-top: auto;
@@ -843,12 +941,27 @@ table.plain th {
   max-width: 560px;
   margin: 0 auto;
   border-radius: 22px 22px 0 0;
-  padding: 20px 18px calc(24px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  overflow: hidden;
+}
+/* Stays put while the body scrolls: "Close" is never off the top of a long sheet. */
+.remote .panel-head {
+  flex: 0 0 auto;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.remote .panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 18px calc(24px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-height: 85vh;
-  overflow-y: auto;
 }
 .remote .list {
   display: flex;
@@ -1172,6 +1285,12 @@ table.plain th {
 }
 
 .notice.accent {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+button.notice.tappable {
+  width: 100%;
+  text-align: left;
   color: var(--accent);
   background: var(--accent-dim);
 }

@@ -381,3 +381,135 @@ describe('stale sessions', () => {
     expect(isStale(s, T0 + 50 * 3600_000)).toBe(false);
   });
 });
+
+describe('the demo clip through a session', () => {
+  /** Warm-up skipped, first set started: the state where a clip would be playing. */
+  function working(demoDuringSets = false) {
+    const o = { ...opts, demoDuringSets };
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, o);
+    s = reduce(s, { type: 'go' }, T0 + 1000, o);
+    return { s, o };
+  }
+
+  it('starts every exercise on screen at normal speed', () => {
+    const s = twoExercises();
+    expect(s.demo.shown).toBe(true);
+    expect(s.demo.rate).toBe(1);
+  });
+
+  it('takes the clip off the screen when a set starts, without rewinding it', () => {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    s = reduce(s, { type: 'showDemo' }, T0 + 500, opts);
+    expect(s.demo.enlarged).toBe(true);
+    const seq = s.demo.seq;
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    expect(s.phase.kind).toBe('working');
+    expect(s.demo).toMatchObject({ shown: false, enlarged: false });
+    // Nothing was told to seek or restart: the player parks where it was.
+    expect(s.demo.seq).toBe(seq);
+  });
+
+  it('leaves it up during the set when that is what you asked for', () => {
+    const { s } = working(true);
+    expect(s.demo.shown).toBe(true);
+  });
+
+  it('brings it back and resets the speed for the next exercise', () => {
+    const { s: started, o } = working();
+    let s = reduce(started, { type: 'demoShown', shown: true }, T0 + 2000, o);
+    s = reduce(s, { type: 'demoRate', rate: 2 }, T0 + 2500, o);
+    expect(s.demo.rate).toBe(2);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 3000, o); // set 1 of 2
+    expect(s.demo.rate).toBe(2); // same exercise, same clip, same place
+    s = reduce(s, { type: 'go' }, T0 + 4000, o);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 5000, o); // on to exercise B
+    expect(s.cursor.ex).toBe(1);
+    expect(s.demo).toMatchObject({ shown: true, enlarged: false, rate: 1 });
+  });
+
+  it('takes the exercise’s own loudness when the clip changes', () => {
+    const s = createSession(
+      { id: 's', dayId: 'A', dayName: 'A', warmup: [], exercises: [planned({ exerciseId: 'a', demoVolume: 25 }), planned({ exerciseId: 'b' })] },
+      T0,
+      { ...opts, demoVolume: 80 },
+    );
+    expect(s.demo.volume).toBe(25);
+    let t = reduce(s, { type: 'go' }, T0 + 1000, { ...opts, demoVolume: 80 });
+    t = reduce(t, { type: 'logReps', reps: 10 }, T0 + 2000, { ...opts, demoVolume: 80 });
+    t = reduce(t, { type: 'go' }, T0 + 3000, { ...opts, demoVolume: 80 });
+    t = reduce(t, { type: 'logReps', reps: 10 }, T0 + 4000, { ...opts, demoVolume: 80 });
+    expect(t.cursor.ex).toBe(1);
+    expect(t.demo.volume).toBe(80); // exercise B has no level of its own
+  });
+
+  it('keeps sound and captions across exercises', () => {
+    const { s: started, o } = working();
+    let s = reduce(started, { type: 'demoMuted', muted: true }, T0 + 2000, o);
+    s = reduce(s, { type: 'demoCaptions', captions: true }, T0 + 2100, o);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 3000, o);
+    s = reduce(s, { type: 'go' }, T0 + 4000, o);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 5000, o);
+    expect(s.demo).toMatchObject({ muted: true, captions: true });
+  });
+
+  it('turning the volume up un-mutes, turning it to zero does not', () => {
+    const { s: started, o } = working();
+    let s = reduce(started, { type: 'demoMuted', muted: true }, T0 + 2000, o);
+    s = reduce(s, { type: 'demoVolume', volume: 40 }, T0 + 2100, o);
+    expect(s.demo).toMatchObject({ volume: 40, muted: false });
+    s = reduce(s, { type: 'demoVolume', volume: 0 }, T0 + 2200, o);
+    expect(s.demo).toMatchObject({ volume: 0, muted: false });
+    s = reduce(s, { type: 'demoVolume', volume: 300 }, T0 + 2300, o);
+    expect(s.demo.volume).toBe(100);
+  });
+});
+
+describe('trimming the rest', () => {
+  function resting() {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    return reduce(s, { type: 'logReps', reps: 8 }, T0 + 2000, opts); // 60 s of rest
+  }
+
+  it('takes seconds off as readily as it adds them', () => {
+    const s = resting();
+    expect(remainingMs(s, T0 + 2000)).toBe(60_000);
+    const shorter = reduce(s, { type: 'extendRest', seconds: -30 }, T0 + 2000, opts);
+    expect(remainingMs(shorter, T0 + 2000)).toBe(30_000);
+    const shorterStill = reduce(shorter, { type: 'extendRest', seconds: -5 }, T0 + 2000, opts);
+    expect(remainingMs(shorterStill, T0 + 2000)).toBe(25_000);
+    const longer = reduce(shorterStill, { type: 'extendRest', seconds: 30 }, T0 + 2000, opts);
+    expect(remainingMs(longer, T0 + 2000)).toBe(55_000);
+  });
+
+  it('never goes below zero, and landing on zero starts the set', () => {
+    const s = resting();
+    const gone = reduce(s, { type: 'extendRest', seconds: -600 }, T0 + 2000, opts);
+    expect(gone.phase).toEqual({ kind: 'working' });
+    expect(remainingMs(gone, T0 + 2000)).toBe(0);
+  });
+});
+
+describe('correcting the weight of a logged set', () => {
+  it('changes only that set, and the record follows', () => {
+    let s = reduce(twoExercises(), { type: 'skipWarmup' }, T0, opts);
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 2000, opts);
+    s = reduce(s, { type: 'go' }, T0 + 3000, opts);
+    s = reduce(s, { type: 'logReps', reps: 8 }, T0 + 4000, opts);
+    expect(toRecord(s).exercises[0].weights).toBeUndefined(); // both sets at one weight
+
+    s = reduce(s, { type: 'editSetWeight', ex: 0, set: 1, weightLb: 19 }, T0 + 5000, opts);
+    expect(s.exercises[0].results.map((r) => r.weightLb)).toEqual([9, 19]);
+    const rec = toRecord(s).exercises[0];
+    expect(rec.weightLb).toBe(9); // what the exercise was worked at: the first set
+    expect(rec.weights).toEqual([9, 19]);
+  });
+
+  it('leaves bodyweight sets alone', () => {
+    let s = createSession({ id: 's', dayId: 'A', dayName: 'A', warmup: [], exercises: [planned({ load: 'bodyweight', weightLb: 0, loading: null })] }, T0, opts);
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    s = reduce(s, { type: 'logReps', reps: 20 }, T0 + 2000, opts);
+    expect(reduce(s, { type: 'editSetWeight', ex: 0, set: 0, weightLb: 19 }, T0 + 3000, opts)).toBe(s);
+  });
+});
