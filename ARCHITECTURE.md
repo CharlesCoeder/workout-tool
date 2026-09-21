@@ -27,10 +27,11 @@ pairings/{CODE}  { tvHid, phoneHid?, createdAt }   short-lived pairing handshake
 
 Types are in `src/engine/types.ts`. Key ones:
 
-- `Exercise` (library entry): `id, name, load: 'pair' | 'single' | 'bodyweight', sets, repMin, repMax, restSec, cue, demo, substitutes[], startWeightLb, perSide, muscles[]` (main muscle first; used for the weekly balance chart).
+- `Exercise` (library entry): `id, name, load: 'pair' | 'single' | 'bodyweight', sets, repMin, repMax, restSec, cue, demo, substitutes[], startWeightLb, perSide, muscles[]` (main muscle first; used for the weekly balance chart), `requires[]` (gear beyond dumbbells: `bench`, `step`, `pullup-bar`) and `demoVolume` (0–100, how loud this particular clip is).
 - `Program.days[]`: ordered `exerciseIds` with an optional per-day override of sets/reps.
-- `Settings`: rest/ready timing, beeps, voice, `progressionRule` (`firstSet` | `allSets`), `targetSessionsPerWeek`, `phoneVibrate`.
-- `SessionRecord`: `{ id, dayId, startedAt, endedAt?, completed, note?, exercises: [{ exerciseId, name, load, weightLb, reps[], note? }] }`. History is upserted after every logged set and every correction, so an abandoned session still counts and an undone set disappears.
+- `Inventory`: handle/collar weights, plate counts, and `gear[]` — the bench, step or pull-up bar you own. Nothing is ever swapped automatically because of it; it decides what the app *offers*.
+- `Settings`: rest/ready timing, beeps, voice, `progressionRule` (`firstSet` | `allSets`), `targetSessionsPerWeek`, `phoneVibrate`, `keepAwake`, and the demo-clip defaults (`demoDuringSets`, `demoCaptions`, `demoVolume`). The slice the pure engine needs is passed as `SessionOptions` (`sessionOptions()` in the store).
+- `SessionRecord`: `{ id, dayId, startedAt, endedAt?, completed, note?, exercises: [{ exerciseId, name, load, weightLb, weights?[], reps[], note? }] }`. `weightLb` is the exercise's working weight (the first set's) and is what progression reads; `weights` appears only when a set was done at a different weight, and everything derived — volume, PRs, records, the CSV — reads per set through `setWeights()`. History is upserted after every logged set and every correction, so an abandoned session still counts and an undone set disappears.
 
 ## Session engine (pure, tested)
 
@@ -42,9 +43,19 @@ Types are in `src/engine/types.ts`. Key ones:
 
 Phases: `idle → warmup(step) → ready → [working → logging? → rest]* → summary`. One tap per set: on the remote the rep picker is shown during `working`, so tapping a number both ends the set and logs it. `logging` exists for the voice path ("done", then a number). The rest before a new exercise is the "get ready" screen: it shows the next exercise, weight, plate change and demo, and is extended by `rerackBonusSec` when the plate loading differs from what is on the bars. `ready` is only used at the start of the session and after a substitution or skip.
 
-Corrections (`undoSet`, `editSet`, `note`) are accepted in every phase, including `summary` and while paused: undo removes the most recently logged set (by timestamp), moves the cursor back to it in `working`, un-skips the exercise and re-opens a finished session. A session untouched for three hours is *stale* (`isStale`); the phone offers to discard it rather than resuming it.
+Corrections (`undoSet`, `editSet`, `editSetWeight`, `note`) are accepted in every phase, including `summary` and while paused: undo removes the most recently logged set (by timestamp), moves the cursor back to it in `working`, un-skips the exercise and re-opens a finished session. A session untouched for three hours is *stale* (`isStale`); the phone offers to discard it rather than resuming it.
 
-Planning (`src/engine/plan.ts`) turns a program day + history + inventory into a `SessionState` with a prescribed weight and plate loading per exercise. This runs on whichever device starts the session.
+`extendRest` takes negative seconds too, clamped so a countdown never goes below zero; landing on zero enters `working` exactly as waiting it out would.
+
+Planning (`src/engine/plan.ts`) turns a program day + history + inventory into a `SessionState` with a prescribed weight and plate loading per exercise. This runs on whichever device starts the session. It also answers the gear questions: `missingGear`/`canDo` (what an exercise needs that you don't have) and `betterWithGear` (substitutes that use gear you own and the planned exercise doesn't) — which drive an offer on the phone, never a change to the plan.
+
+## The demo clip
+
+The clip state lives in `SessionState.demo`: `shown` (on the TV at all), `enlarged` (filling it), `rate`, `muted`, `volume`, `captions`, plus the one-shot `cmd`/`seq` channel the phone drives the player with. Both screens derive it from the same state, so the phone's controls always describe what the TV is doing.
+
+`shown` is engine-owned: it goes true when the cursor reaches a new exercise (along with `rate` back to 1× and `volume` from that exercise's own level), and false when a set starts unless `demoDuringSets` is on. Nothing rewinds it.
+
+On the TV, `src/tv/DemoLayer.tsx` mounts exactly one player for the current exercise. Screens render an empty `<DemoSlot />` where the clip belongs (`kind="stage"` inside the enlarged overlay); the player is a fixed-position box that measures the active slot and animates onto it, so moving between screens or going full screen never unmounts the iframe — which is the only way to keep a YouTube embed from restarting. With no slot to sit on, the player is parked invisible and paused, and resumed when it comes back (unless you were the one who paused it). Registration is split across two contexts so the slot's callback ref never changes identity, which would otherwise detach and re-attach forever.
 
 ## Progression
 
@@ -70,7 +81,7 @@ Live state is one node, `live`, written whole on every action. Both clients subs
 
 Pairing: the TV generates a 4-letter code, writes `pairings/CODE = { tvHid }` and listens on it. The remote enters the code (or opens the URL with `?pair=CODE`), reads `tvHid`, and answers with `phoneHid`: if the phone already has a household (existing history) that wins and the TV adopts it; otherwise the phone adopts the TV's. Both store the hid in `localStorage`, the pairing node is deleted, and from then on nothing is typed on either device again. In local mode both tabs simply share the same household.
 
-Phone lock: the remote requests a Screen Wake Lock during a session, and Firebase resubscribes on reconnect, so the state is current the moment the screen comes back.
+Phone lock: the app requests a Screen Wake Lock on every page while `keepAwake` is on (`src/lib/useWakeLock.ts`, held from `App.tsx`), re-taking it whenever the tab becomes visible again and on the first gesture if the browser wanted one; Firebase resubscribes on reconnect, so the state is current the moment the screen comes back.
 
 ## Pages
 
