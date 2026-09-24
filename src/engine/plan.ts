@@ -67,6 +67,14 @@ export function planSession(
 }
 
 /** Convert a live session into the history record shape. */
+/**
+ * A session is only worth a history row once something has actually been logged.
+ * An empty one is noise: it counts toward the weekly target and tells progression nothing.
+ */
+export function worthKeeping(s: SessionState): boolean {
+  return s.exercises.some((e) => e.results.length > 0);
+}
+
 export function toRecord(s: SessionState): SessionRecord {
   return {
     id: s.id,

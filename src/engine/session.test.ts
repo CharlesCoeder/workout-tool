@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSession, isStale, lastActivityAt, needsRerack, progress, reduce, remainingMs, settle } from './session';
-import { planDay, planSession, suggestNextDay, toRecord } from './plan';
+import { planDay, planSession, suggestNextDay, toRecord, worthKeeping } from './plan';
 import { DEFAULT_INVENTORY as inv, DEFAULT_PROGRAM } from './defaults';
 import type { PlannedExercise, SessionState } from './types';
 
@@ -379,5 +379,26 @@ describe('stale sessions', () => {
     // a finished session is never stale; it is just waiting for "Finish"
     s = reduce(s, { type: 'endSession' }, T0 + 3700_000, opts);
     expect(isStale(s, T0 + 50 * 3600_000)).toBe(false);
+  });
+
+  it('an empty session is never worth keeping, summary included', () => {
+    let s = planSession(DEFAULT_PROGRAM, 'A', [], inv, T0, undefined, 'firstSet');
+    expect(worthKeeping(s)).toBe(false);
+
+    // Ending a session you never logged used to write an empty day into history.
+    s = reduce(s, { type: 'endSession' }, T0 + 1000, opts);
+    expect(s.phase.kind).toBe('summary');
+    expect(worthKeeping(s)).toBe(false);
+  });
+
+  it('a session is worth keeping as soon as one set is logged, and not after it is undone', () => {
+    let s = planSession(DEFAULT_PROGRAM, 'A', [], inv, T0, undefined, 'firstSet');
+    s = reduce(s, { type: 'skipWarmup' }, T0, opts);
+    s = reduce(s, { type: 'go' }, T0 + 1000, opts);
+    s = reduce(s, { type: 'logReps', reps: 10 }, T0 + 2000, opts);
+    expect(worthKeeping(s)).toBe(true);
+
+    s = reduce(s, { type: 'undoSet' }, T0 + 3000, opts);
+    expect(worthKeeping(s)).toBe(false);
   });
 });

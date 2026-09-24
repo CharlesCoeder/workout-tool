@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Action, Inventory, Program, SessionRecord, SessionState, Settings } from '../engine/types';
 import { reduce, settle } from '../engine/session';
-import { planSession, toRecord } from '../engine/plan';
+import { planSession, toRecord, worthKeeping } from '../engine/plan';
 import { getBackend, type Backend } from '../backend';
 import {
   normalizeInventory,
@@ -126,9 +126,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const persistRecord = useCallback(
     async (s: SessionState) => {
-      const hasResults = s.exercises.some((e) => e.results.length > 0);
-      if (!hasResults && s.phase.kind !== 'summary') {
-        // The only logged set was undone: nothing to keep (and no stale record either).
+      if (!worthKeeping(s)) {
+        // Nothing was ever logged, or the only set was undone. True at the summary too:
+        // ending a session you never logged must not leave an empty day in history.
         await backend.remove(`${base}/sessions/${s.id}`);
         return;
       }
