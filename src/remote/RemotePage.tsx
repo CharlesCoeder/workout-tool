@@ -23,7 +23,7 @@ import { LogSheet } from './LogSheet';
 import { WeighSheet } from './WeighSheet';
 import { summarize, todayKey as todayKeyLocal } from '../engine/body';
 
-type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'pair' | 'demo' | 'log' | 'weigh';
+type Sheet = null | 'menu' | 'weight' | 'swap' | 'end' | 'discard' | 'pair' | 'demo' | 'log' | 'weigh';
 
 export function RemotePage() {
   const app = useApp();
@@ -98,6 +98,10 @@ export function RemotePage() {
             <button className="item danger" onClick={() => setSheet('end')}>
               End session early
             </button>
+            <button className="item danger" onClick={() => setSheet('discard')}>
+              Discard session
+              <span className="muted" style={{ fontSize: 13 }}>clear the screens</span>
+            </button>
           </div>
           <div className="row" style={{ justifyContent: 'center', gap: 18 }}>
             <Link to="/history">History</Link>
@@ -115,6 +119,21 @@ export function RemotePage() {
           <p className="muted">What you've logged so far is saved and counts for progression.</p>
           <button className="btn danger big" onClick={() => void app.dispatch({ type: 'endSession' }).then(closeSheet)}>
             End session
+          </button>
+          <button className="btn ghost" onClick={closeSheet}>
+            Keep going
+          </button>
+        </BottomSheet>
+      )}
+      {sheet === 'discard' && session && (
+        <BottomSheet onClose={closeSheet} title="Discard this session?">
+          <p className="muted">
+            {progress(session).setsDone
+              ? `The ${progress(session).setsDone} set${progress(session).setsDone === 1 ? '' : 's'} you have already logged stay in your history and count for progression. Everything still to come is dropped and both screens go back to the start.`
+              : 'Nothing has been logged, so nothing is kept: both screens go back to the start and your history is untouched.'}
+          </p>
+          <button className="btn danger big" onClick={() => void app.clearLive().then(closeSheet)}>
+            Discard session
           </button>
           <button className="btn ghost" onClick={closeSheet}>
             Keep going
