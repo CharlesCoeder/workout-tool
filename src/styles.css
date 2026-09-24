@@ -1250,3 +1250,14 @@ details summary::-webkit-details-marker {
   font-size: 3vmin;
   color: var(--fg-2);
 }
+
+/* The pairing code stays reachable during a session, quiet enough to ignore once paired. */
+.tv .pair-chip {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.8vmin 1.4vmin;
+  border-radius: 0.8vmin;
+}
+.tv .pair-chip b {
+  letter-spacing: 0.25em;
+  color: var(--accent);
+}

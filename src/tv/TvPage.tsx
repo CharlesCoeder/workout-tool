@@ -24,6 +24,8 @@ export function TvPage() {
   const app = useApp();
   const { session, now } = useSettled();
   const [code, setCode] = useState<string | null>(null);
+  // A phone that paired during this page load: the code is only worth showing until then.
+  const [paired, setPaired] = useState(false);
   // Browsers allow sound (beeps, demo audio) only after a click on the page.
   const activated = useUserActivated();
 
@@ -35,6 +37,7 @@ export function TvPage() {
     const start = () => {
       const h = hostPairing(app.backend, app.hid, (hid) => {
         if (cancelled) return;
+        setPaired(true);
         if (hid !== app.hid) app.setHid(hid);
         stop();
         setTimeout(start, 500);
@@ -212,6 +215,7 @@ export function TvPage() {
   }
 
   const ex = currentExercise(session);
+  const host = window.location.host;
   const rate = session.demo.rate;
   const timedLabel =
     p.kind === 'rest' ? 'Rest' : p.kind === 'ready' ? 'Starts in' : p.kind === 'warmup' ? 'Warm-up' : p.kind === 'working' ? `Set ${session.cursor.set + 1}` : '';
@@ -260,6 +264,11 @@ export function TvPage() {
           <span className="eyebrow">Reps</span>
           <b>{typed}</b>
           <span className="hint">Enter to log</span>
+        </div>
+      )}
+      {app.mode === 'firebase' && code && !paired && p.kind !== 'summary' && (
+        <div style={{ position: 'fixed', left: '5vmin', bottom: '1.5vmin' }} className="hint pair-chip">
+          Pair a phone: <span className="mono">{host}/remote</span> · <b className="mono">{code}</b>
         </div>
       )}
       {(soundHint || voiceHint || staleHint) && (
