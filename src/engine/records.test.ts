@@ -243,3 +243,11 @@ describe('what extra reps are worth', () => {
     expect(rangeExplainer(planned({}))).toContain('12');
   });
 });
+
+describe('bodyweight work below the range', () => {
+  it('aims one past what you managed rather than the bottom of the range', () => {
+    const ex = planned({ load: 'bodyweight', weightLb: 0, repMin: 10, repMax: 25, lastTime: { weightLb: 0, reps: [2, 1] } });
+    expect(targetReps(ex, 0)).toEqual({ reps: 3, reason: 'beat', lastReps: 2 });
+    expect(targetReps(ex, 1)).toEqual({ reps: 2, reason: 'beat', lastReps: 1 });
+  });
+});

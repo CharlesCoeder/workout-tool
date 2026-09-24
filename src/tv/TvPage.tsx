@@ -444,7 +444,7 @@ function ParkedClip({ ex }: { ex: PlannedExercise }) {
   return (
     <div className="parked">
       <span className="eyebrow">Demo</span>
-      <span className="hint">Paused where you left it. "Show demo" on your phone brings it back.</span>
+      <span className="hint">Paused where you left it. "Demo video" → "Show on TV" on your phone brings it back.</span>
     </div>
   );
 }
@@ -453,7 +453,7 @@ function LastTime({ ex }: { ex: PlannedExercise }) {
   if (!ex.lastTime)
     return (
       <div className="lasttime faint">
-        {ex.load === 'bodyweight' ? `First time on this one. Stop a rep or two short of failure.` : `First time on this one. Pick a weight you can do for ${ex.repMax} clean reps.`}
+        {ex.load === 'bodyweight' ? `First time on this one. Stop a rep or two short of failure.` : `First time on this one. Stop a rep or two before your form would break; next time's weight is worked out from this.`}
       </div>
     );
   const bwTop = ex.load === 'bodyweight' && ex.lastTime.reps[0] >= ex.repMax;

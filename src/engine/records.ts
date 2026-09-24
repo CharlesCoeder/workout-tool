@@ -238,6 +238,9 @@ export function targetReps(ex: PlannedExercise, setIndex: number): RepTarget | n
   if (!sameWeight) return { reps: ex.repMin, reason: 'newWeight', lastReps: null };
   const lastReps = last.reps[Math.min(setIndex, last.reps.length - 1)];
   if (lastReps >= ex.repMax) return { reps: ex.repMax, reason: 'top', lastReps };
+  // Below the range on a bodyweight exercise there is no lighter weight to drop to, so the
+  // honest target is one more than you managed, not the bottom of a range you can't reach yet.
+  if (ex.load === 'bodyweight' && lastReps < ex.repMin) return { reps: lastReps + 1, reason: 'beat', lastReps };
   return { reps: Math.min(ex.repMax, Math.max(ex.repMin, lastReps + 1)), reason: 'beat', lastReps };
 }
 
@@ -283,5 +286,5 @@ export function repGuidance(ex: PlannedExercise, setIndex: number, rule: Progres
 /** One line explaining what a rep range is for, for someone seeing "6–12" and wondering. */
 export function rangeExplainer(ex: PlannedExercise): string {
   if (ex.load === 'bodyweight') return `${ex.repMin}–${ex.repMax} is the working range: climb it, then make the movement harder.`;
-  return `${ex.repMin}–${ex.repMax} is a ladder, not a choice: a new weight starts near ${ex.repMin}, you climb to ${ex.repMax} over sessions, then add a plate and start again.`;
+  return `${ex.repMin}–${ex.repMax} is a ladder, not a choice: add a rep or two each session until your first set reaches ${ex.repMax}, then the weight goes up a step and you climb again from lower in the range.`;
 }

@@ -820,6 +820,13 @@ table.plain th {
   background: var(--accent);
   color: var(--accent-ink);
 }
+/* Opens the numbers below the grid: fewer reps than the range expects still get logged. */
+.remote .reps button.fewer {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--fg-2);
+  font-size: 20px;
+}
 /* Past the number that earns the step: still tappable, but not something to chase. */
 .remote .reps button.over {
   background: transparent;

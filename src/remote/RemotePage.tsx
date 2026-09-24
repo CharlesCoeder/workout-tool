@@ -463,11 +463,17 @@ function ReadyControls({
 function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeight: () => void; onSwap: () => void; onDemo: () => void }) {
   const app = useApp();
   const ex = currentExercise(s)!;
-  const lo = Math.max(1, ex.repMin - 3);
-  const hi = ex.repMax + 4;
-  const nums = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   const target = targetReps(ex, s.cursor.set);
   const guide = repGuidance(ex, s.cursor.set, app.settings.progressionRule);
+  // The grid starts a little below the range, or below the target when that is lower
+  // (bodyweight work you are still building up to). Anything under that is one tap away
+  // rather than missing: two sit-ups is a real result, not a "couldn't do it".
+  const here = `${s.cursor.ex}-${s.cursor.set}`;
+  const [lowFor, setLowFor] = useState<string | null>(null);
+  const floor = Math.max(1, Math.min(ex.repMin, target?.reps ?? ex.repMin) - 3);
+  const lo = lowFor === here ? 1 : floor;
+  const hi = ex.repMax + 4;
+  const nums = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   return (
     <>
       <ExerciseHero ex={ex} sub={`Set ${s.cursor.set + 1} of ${ex.sets} · in progress`} />
@@ -483,6 +489,11 @@ function RepControls({ s, onWeight, onSwap, onDemo }: { s: SessionState; onWeigh
         How many reps did you get{ex.perSide ? ' (per side)' : ''}? Tap the number when you're done.
       </div>
       <div className="reps">
+        {lo > 1 && (
+          <button className="fewer" onClick={() => setLowFor(here)} aria-label={`Fewer than ${lo}`}>
+            {lo === 2 ? '1' : `1–${lo - 1}`}
+          </button>
+        )}
         {nums.map((n) => {
           const over = n > guide.stopAt;
           const tone = over ? (guide.capped ? 'over' : 'top') : n === guide.stopAt ? 'top' : n >= ex.repMin ? 'in' : '';
