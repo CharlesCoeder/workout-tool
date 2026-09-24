@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { allPrs, e1rm, liftRecords, prForSet, priorBest, rangeExplainer, recordVolume, repGuidance, sessionPrs, sessionVolume, setVolume, setWeights, targetReps } from './records';
+import {
+  allPrs,
+  e1rm,
+  liftRecords,
+  prForSet,
+  priorBest,
+  rangeExplainer,
+  recordVolume,
+  repGuidance,
+  sessionPrs,
+  sessionVolume,
+  setVolume,
+  setWeights,
+  targetReps,
+  volumeBreakdown,
+} from './records';
 import { createSession, reduce } from './session';
 import { DEFAULT_PROGRAM } from './defaults';
 import type { PlannedExercise, SessionRecord, SessionState } from './types';
@@ -249,5 +264,21 @@ describe('bodyweight work below the range', () => {
     const ex = planned({ load: 'bodyweight', weightLb: 0, repMin: 10, repMax: 25, lastTime: { weightLb: 0, reps: [2, 1] } });
     expect(targetReps(ex, 0)).toEqual({ reps: 3, reason: 'beat', lastReps: 2 });
     expect(targetReps(ex, 1)).toEqual({ reps: 2, reason: 'beat', lastReps: 1 });
+  });
+});
+
+describe('where the volume comes from', () => {
+  it('breaks a total down by exercise, biggest first, and adds up to it', () => {
+    const s = rec('v', 10, [
+      { exerciseId: 'curl', weightLb: 9, reps: [10, 10, 8] },
+      { exerciseId: 'squat', weightLb: 19, reps: [10, 10, 10] },
+      { exerciseId: 'one-arm-row', weightLb: 19, weights: [19, 19, 14], reps: [10, 9, 9], load: 'single' },
+      { exerciseId: 'situp', weightLb: 0, reps: [2, 1], load: 'bodyweight' },
+    ]);
+    const lines = volumeBreakdown([s], DEFAULT_PROGRAM);
+    expect(lines.map((l) => l.exerciseId)).toEqual(['squat', 'one-arm-row', 'curl']);
+    expect(lines[0]).toMatchObject({ sets: 3, reps: 30, minLb: 19, maxLb: 19, volumeLb: 19 * 2 * 30 });
+    expect(lines[1]).toMatchObject({ perSide: true, minLb: 14, maxLb: 19 });
+    expect(lines.reduce((n, l) => n + l.volumeLb, 0)).toBe(recordVolume(s, DEFAULT_PROGRAM));
   });
 });

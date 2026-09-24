@@ -1216,12 +1216,32 @@ table.plain th {
 .volbars rect.cur {
   fill: var(--accent);
 }
+.volbars .pick {
+  cursor: pointer;
+}
+.volbars rect.hit {
+  fill: transparent;
+}
+.volbars line.plan {
+  stroke: var(--fg-3);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
 .muscles {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .muscles .mrow {
+  width: 100%;
+  padding: 2px 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   display: grid;
   grid-template-columns: 90px 1fr 64px;
   align-items: center;
@@ -1251,6 +1271,15 @@ table.plain th {
 }
 .muscles .bar .done {
   background: var(--accent);
+}
+.muscles .mrow.open .name {
+  color: var(--accent);
+}
+.muscles .mdetail {
+  padding: 10px 12px 12px;
+  background: var(--bg-3);
+  border-radius: 12px;
+  margin-bottom: 6px;
 }
 .muscles .num {
   text-align: right;

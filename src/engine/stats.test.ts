@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { addDays, consistency, dayKey, daysBetween, estimateSessionMs, plannedSetsPerMuscle, setsPerMuscle, startOfWeek, typicalDurationMs, weeklyStats } from './stats';
+import {
+  addDays,
+  consistency,
+  dayKey,
+  daysBetween,
+  estimateSessionMs,
+  firstWeek,
+  muscleSources,
+  muscleWeeks,
+  plannedSetsPerMuscle,
+  setsPerMuscle,
+  startOfWeek,
+  typicalDurationMs,
+  weeklyStats,
+} from './stats';
 import { planDay } from './plan';
 import { DEFAULT_INVENTORY as inv, DEFAULT_PROGRAM } from './defaults';
 import type { SessionRecord } from './types';
@@ -82,6 +96,39 @@ describe('muscle balance', () => {
     // curl A (3) + hammer curl C (3) + half of rows A, B and chin-up-free B rows
     expect(m.get('biceps')).toBe(3 + 3 + 1.5 + 1.5);
     expect(m.get('core')).toBe(6);
+  });
+});
+
+describe('one muscle over time', () => {
+  const now = at(2026, 9, 9, 12); // Wednesday
+  const history = [
+    rec(at(2026, 8, 24), 'A', 40, [{ exerciseId: 'squat', name: 'Squat', load: 'pair', weightLb: 14, reps: [10, 9] }]),
+    rec(at(2026, 9, 2), 'A', 40, [
+      { exerciseId: 'squat', name: 'Squat', load: 'pair', weightLb: 14, reps: [10, 10, 9] },
+      { exerciseId: 'sldl', name: 'SLDL', load: 'pair', weightLb: 19, reps: [10, 10, 0] },
+    ]),
+    rec(at(2026, 9, 7), 'C', 40, [{ exerciseId: 'lunge', name: 'Lunge', load: 'pair', weightLb: 9, reps: [12, 12] }]),
+  ];
+
+  it('counts a muscle week by week, blanks included', () => {
+    const w = muscleWeeks(history, DEFAULT_PROGRAM, 'glutes', 4, now);
+    expect(w.map((x) => dayKey(x.start))).toEqual(['2026-08-17', '2026-08-24', '2026-08-31', '2026-09-07']);
+    // Glutes are the squat's and the lunge's helper (½ a set each) and the stiff-leg deadlift's too;
+    // the deadlift's zero-rep set does not count.
+    expect(w.map((x) => x.sets)).toEqual([0, 1, 1.5 + 1, 1]);
+  });
+
+  it('says which exercises the sets came from, main muscle or helper', () => {
+    const src = muscleSources(history, DEFAULT_PROGRAM, 'quads', addDays(startOfWeek(now), -21), addDays(startOfWeek(now), 7));
+    expect(src.map((s) => s.exerciseId)).toEqual(['squat', 'lunge']);
+    expect(src[0]).toMatchObject({ sets: 5, main: true });
+    // A window with nothing in it is empty rather than a list of zeros.
+    expect(muscleSources(history, DEFAULT_PROGRAM, 'quads', at(2026, 1, 1), at(2026, 2, 1))).toEqual([]);
+  });
+
+  it('knows where history starts', () => {
+    expect(firstWeek([])).toBeNull();
+    expect(dayKey(firstWeek(history)!)).toBe('2026-08-24');
   });
 });
 

@@ -134,6 +134,67 @@ export function setsPerMuscle(history: SessionRecord[], program: Program, weekSt
   return out;
 }
 
+/** How much one set of an exercise counts towards `muscle`: 1 as the main muscle, ½ as another, 0 otherwise. */
+function creditFor(muscles: string[] | undefined, muscle: string): number {
+  const i = muscles?.indexOf(muscle) ?? -1;
+  return i < 0 ? 0 : i === 0 ? 1 : 0.5;
+}
+
+export interface MuscleWeek {
+  /** Monday 00:00 local. */
+  start: number;
+  /** Credited sets that week (main muscle 1, secondary ½). */
+  sets: number;
+}
+
+/** One muscle's weekly sets over the last `weeks` weeks ending with the week containing `now`, oldest first. */
+export function muscleWeeks(history: SessionRecord[], program: Program, muscle: string, weeks: number, now: number): MuscleWeek[] {
+  const thisStart = startOfWeek(now);
+  const out: MuscleWeek[] = [];
+  for (let i = weeks - 1; i >= 0; i--) out.push({ start: addDays(thisStart, -7 * i), sets: 0 });
+  const first = out[0]?.start ?? thisStart;
+  for (const s of history) {
+    if (s.startedAt < first) continue;
+    const w = out.find((x) => x.start === startOfWeek(s.startedAt));
+    if (!w) continue;
+    for (const e of s.exercises) w.sets += creditFor(program.exercises[e.exerciseId]?.muscles, muscle) * e.reps.filter((r) => r > 0).length;
+  }
+  return out;
+}
+
+export interface MuscleSource {
+  exerciseId: string;
+  name: string;
+  /** Credited sets between `from` and `to`. */
+  sets: number;
+  /** This muscle is the exercise's main one (full credit) rather than a helper (half). */
+  main: boolean;
+}
+
+/** Which exercises a muscle's sets came from between `from` (inclusive) and `to` (exclusive), most first. */
+export function muscleSources(history: SessionRecord[], program: Program, muscle: string, from: number, to: number): MuscleSource[] {
+  const by = new Map<string, MuscleSource>();
+  for (const s of history) {
+    if (s.startedAt < from || s.startedAt >= to) continue;
+    for (const e of s.exercises) {
+      const muscles = program.exercises[e.exerciseId]?.muscles;
+      const credit = creditFor(muscles, muscle);
+      const done = e.reps.filter((r) => r > 0).length;
+      if (!credit || !done) continue;
+      const src = by.get(e.exerciseId) ?? { exerciseId: e.exerciseId, name: program.exercises[e.exerciseId]?.name ?? e.name, sets: 0, main: credit === 1 };
+      src.sets += credit * done;
+      by.set(e.exerciseId, src);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.sets - a.sets || a.name.localeCompare(b.name));
+}
+
+/** Monday of the week of the earliest session, or null with no history. */
+export function firstWeek(history: SessionRecord[]): number | null {
+  if (!history.length) return null;
+  return startOfWeek(Math.min(...history.map((s) => s.startedAt)));
+}
+
 /** Sets per muscle the program prescribes if every day is done once. */
 export function plannedSetsPerMuscle(program: Program): Map<string, number> {
   const out = new Map<string, number>();

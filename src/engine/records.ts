@@ -13,10 +13,67 @@ export function e1rm(weightLb: number, reps: number): number {
   return Math.round(weightLb * (1 + reps / 30) * 10) / 10;
 }
 
+/** How many times one rep's weight is counted: 2 for a pair of dumbbells, 2 again for a lift done each side. */
+export function volumeMultiplier(load: LoadMode, perSide: boolean): number {
+  if (load === 'bodyweight') return 0;
+  return (load === 'pair' ? 2 : 1) * (perSide ? 2 : 1);
+}
+
 /** Pounds moved by one set: both dumbbells for a pair, both sides for a per-side lift. */
 export function setVolume(weightLb: number, reps: number, load: LoadMode, perSide: boolean): number {
   if (load === 'bodyweight' || weightLb <= 0) return 0;
-  return weightLb * reps * (load === 'pair' ? 2 : 1) * (perSide ? 2 : 1);
+  return weightLb * reps * volumeMultiplier(load, perSide);
+}
+
+export interface VolumeLine {
+  exerciseId: string;
+  name: string;
+  load: LoadMode;
+  perSide: boolean;
+  /** Sets with at least one rep. */
+  sets: number;
+  reps: number;
+  /** Lightest and heaviest weight those reps were done at. */
+  minLb: number;
+  maxLb: number;
+  volumeLb: number;
+}
+
+/**
+ * Where a volume total comes from, one line per exercise, biggest first. "4,868 lb" from a
+ * set of 12 lb dumbbells reads like a bug until you see it is 19 lb × 2 dumbbells × 30 reps
+ * plus the rest; bodyweight work is left out because it adds nothing to the total.
+ */
+export function volumeBreakdown(records: SessionRecord[], program?: Program): VolumeLine[] {
+  const by = new Map<string, VolumeLine>();
+  for (const rec of records) {
+    for (const e of rec.exercises) {
+      if (e.load === 'bodyweight') continue;
+      const ps = perSideOf(program, e.exerciseId);
+      const ws = setWeights(e);
+      e.reps.forEach((r, i) => {
+        if (r <= 0 || ws[i] <= 0) return;
+        const line = by.get(e.exerciseId) ?? {
+          exerciseId: e.exerciseId,
+          name: program?.exercises[e.exerciseId]?.name ?? e.name,
+          load: e.load,
+          perSide: ps,
+          sets: 0,
+          reps: 0,
+          minLb: ws[i],
+          maxLb: ws[i],
+          volumeLb: 0,
+        };
+        line.sets++;
+        line.reps += r;
+        line.minLb = Math.min(line.minLb, ws[i]);
+        line.maxLb = Math.max(line.maxLb, ws[i]);
+        line.volumeLb += setVolume(ws[i], r, e.load, ps);
+        by.set(e.exerciseId, line);
+      });
+    }
+  }
+  return [...by.values()].sort((a, b) => b.volumeLb - a.volumeLb);
 }
 
 function perSideOf(program: Program | undefined, exerciseId: string): boolean {
