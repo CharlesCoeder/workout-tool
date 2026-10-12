@@ -34,6 +34,14 @@ export function normalizeProgram(p: Partial<Program> | null): Program {
   if (!p) return DEFAULT_PROGRAM;
   const exercises: Record<string, Exercise> = {};
   for (const [id, e] of Object.entries(p.exercises ?? {})) exercises[id] = normalizeExercise({ ...(e as Exercise), id });
+  // Exercises added to the default library after this program was saved join it, and the
+  // default swaps that point at them are offered. Swaps you removed yourself stay removed.
+  const added = Object.keys(DEFAULT_PROGRAM.exercises).filter((id) => !exercises[id]);
+  for (const id of added) exercises[id] = { ...DEFAULT_PROGRAM.exercises[id], substitutes: [...DEFAULT_PROGRAM.exercises[id].substitutes] };
+  for (const e of Object.values(exercises)) {
+    const extra = (DEFAULT_PROGRAM.exercises[e.id]?.substitutes ?? []).filter((id) => added.includes(id) && !e.substitutes.includes(id));
+    if (extra.length) e.substitutes = [...e.substitutes, ...extra];
+  }
   return {
     days: arr<Program['days'][number]>(p.days).map((d) => ({ ...d, entries: arr(d.entries) })),
     exercises,

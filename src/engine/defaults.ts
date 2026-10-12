@@ -96,6 +96,8 @@ const DEMOS: Record<string, string> = {
   'lying-extension': '2XDPNh7a8p8',
   'leg-raise': 'SuIxXbKnwx4',
   'goblet-squat': 'Xjo_fY9Hl9w',
+  'bench-press': 'AduT4Eq-iP0',
+  'incline-press': 'oZVCBM9f8Eo',
 };
 
 const ex = (
