@@ -399,7 +399,7 @@ function WeightBlock({ ex, size = 'big', showPerEnd = true }: { ex: PlannedExerc
       {(showPerEnd || ex.weightLb !== ex.prescribedLb) && (
         <div className="muted" style={{ fontSize: '2.6vmin' }}>
           {showPerEnd && ex.loading ? perEndLabel(ex.loading.perEnd) : ''}
-          {ex.weightLb !== ex.prescribedLb && <span className="faint"> · overridden from {formatLb(ex.prescribedLb)} lb</span>}
+          {ex.weightLb !== ex.prescribedLb && <span className="faint"> · prescribed {formatLb(ex.prescribedLb)} lb</span>}
         </div>
       )}
     </div>
