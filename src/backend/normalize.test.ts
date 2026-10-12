@@ -7,7 +7,7 @@ describe('normalizeProgram', () => {
     const { ['bench-press']: _b, ['incline-press']: _i, ...older } = DEFAULT_PROGRAM.exercises;
     const saved = { ...DEFAULT_PROGRAM, exercises: { ...older, 'floor-press': { ...older['floor-press'], substitutes: ['pushup'] } } };
     const p = normalizeProgram(saved);
-    expect(p.exercises['bench-press'].demo).toEqual({ type: 'youtube', id: 'AduT4Eq-iP0' });
+    expect(p.exercises['bench-press'].demo).toEqual({ type: 'youtube', id: '_1MkDIqT9mA' });
     expect(p.exercises['incline-press']).toBeDefined();
     expect(p.exercises['floor-press'].substitutes).toEqual(['pushup', 'bench-press', 'incline-press']);
     expect(DEFAULT_PROGRAM.exercises['bench-press'].substitutes).toEqual(['floor-press', 'incline-press']);
